@@ -1,5 +1,5 @@
 from flask import Flask, Blueprint, request
-from utils import get_db
+from api.utils.utils import get_db
 
 
 constituency_bp = Blueprint("constituency", __name__)

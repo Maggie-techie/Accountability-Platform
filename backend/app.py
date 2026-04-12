@@ -1,14 +1,16 @@
+import os
 from flask import Flask, jsonify, request
 from pymongo import MongoClient
 from datetime import datetime
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 
+
 # api blueprints
 
 from api.auth import auth_bp
 from api.constituency import constituency_bp
-from api.governors import governer_bp
+from api.governors import governor_bp
 
 def create_app() -> Flask:
     app = Flask(__name__)
@@ -28,7 +30,7 @@ def create_app() -> Flask:
 
     #  Blueprints 
     app.register_blueprint(auth_bp,     url_prefix="/auth")
-    app.register_blueprint(governer_bp,    url_prefix="/governor")
+    app.register_blueprint(governor_bp,    url_prefix="/governor")
     app.register_blueprint(constituency_bp, url_prefix="/constituency")
 
     #  Error handlers 

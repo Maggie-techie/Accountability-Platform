@@ -1,14 +1,13 @@
 from flask import Flask,Blueprint, jsonify, request
 
-from utils import get_db
+from api.utils.utils import get_db
 
 governor_bp = Blueprint("governor", __name__)
 
 # governors profile
 @governor_bp.route("/governor", methods=["GET"])
 def get_governor():
-    
-
+    profile = db.governor.find('')
 # get county finances
 @governor_bp.route("/governor/finances", methods=["GET"])
 def get_finances():
