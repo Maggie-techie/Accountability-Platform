@@ -1,96 +1,53 @@
 from flask import Flask, jsonify, request
 from pymongo import MongoClient
 from datetime import datetime
+from flask_cors import CORS
+from flask_jwt_extended import JWTManager
 
-app = Flask(__name__)
+# api blueprints
 
-# ----------------------------
-# MongoDB Connection
-# ----------------------------
-client = MongoClient("mongodb://localhost:27017")
-db = client["Accountability"]
+from api.auth import auth_bp
+from api.constituency import constituency_bp
+from api.governors import governer_bp
 
-# ----------------------------
-# Root route (home)
-# ----------------------------
-@app.route("/", methods=["GET"])
-def home():
-    return "Flask API is running! Available endpoints: /api/governor, /api/finances, /api/audit, /api/departments, /api/score"
+def create_app() -> Flask:
+    app = Flask(__name__)
+    # Cors facilitates api fetches between flask and the frontend
+    
+    CORS(app)
 
-# ----------------------------
-# Get Governor profile
-# ----------------------------
-@app.route("/api/governor", methods=["GET"])
-def get_governor():
-    governor = db.county_leaders.find_one({"role": "Governor"}, {"_id": 0})
-    return jsonify(governor)
+    #  Configurations for jwt token manager, mongo database, locally installed ollama and qwen ai model  
+    app.config["JWT_SECRET_KEY"]          = os.getenv("JWT_SECRET_KEY", "dev-secret-change-in-prod")
+    app.config["JWT_ACCESS_TOKEN_EXPIRES"] = False   # long-lived for demo; tighten in prod
+    app.config["MONGODB_URI"]             = os.getenv("MONGODB_URI", "mongodb://localhost:27017/Accountability")
+    app.config["OLLAMA_HOST"]             = os.getenv("OLLAMA_HOST", "http://localhost:11434")
+    app.config["OLLAMA_MODEL"]            = os.getenv("OLLAMA_MODEL", "qwen")
 
-# ----------------------------
-# Get County Finances
-# ----------------------------
-@app.route("/api/finances", methods=["GET"])
-def get_finances():
-    year = request.args.get("year")
-    query = {}
-    if year:
-        query["financial_year"] = year
-    data = list(db.county_finances.find(query, {"_id": 0}))
-    return jsonify(data)
+    #  Extensions 
+    JWTManager(app)
 
-# ----------------------------
-# Get Audit Findings
-# ----------------------------
-@app.route("/api/audit", methods=["GET"])
-def get_audit():
-    data = list(db.county_audit_findings.find({}, {"_id": 0}))
-    return jsonify(data)
+    #  Blueprints 
+    app.register_blueprint(auth_bp,     url_prefix="/auth")
+    app.register_blueprint(governer_bp,    url_prefix="/governor")
+    app.register_blueprint(constituency_bp, url_prefix="/constituency")
 
-# ----------------------------
-# Get Departments Data
-# ----------------------------
-@app.route("/api/departments", methods=["GET"])
-def get_departments():
-    data = list(db.department_absorption.find({}, {"_id": 0}))
-    return jsonify(data)
+    #  Error handlers 
+    @app.errorhandler(404)
+    def not_found(e):
+        return jsonify({"error": "not found"}), 404
+    
+    @app.errorhandler(500)
+    def server_error(e):
+        return jsonify({"error": "internal server error", "detail": str(e)}), 500
 
-# ----------------------------
-# Scoring Model
-# ----------------------------
-def calculate_score(finance, audit, department):
-    score = 0
+    @app.route("/health")
+    def health():
+        return jsonify({"status": "ok", "service": "Accountability"})
 
-    # Penalize misappropriation
-    for a in audit:
-        if a.get("finding_type") == "misappropriation":
-            score -= a.get("amount_flagged_kshm", 0)
 
-    # Reward high budget absorption
-    for d in department:
-        score += d.get("absorption_rate", 0)
+    return app
 
-    # Reward revenue collection
-    for f in finance:
-        score += f.get("amount_kshb", 0) / 1e3  # scale down
-
-    return round(score, 2)
-
-# ----------------------------
-# Get Governor Score
-# ----------------------------
-@app.route("/api/score", methods=["GET"])
-def get_score():
-    finance = list(db.county_finances.find({}, {"_id": 0}))
-    audit = list(db.county_audit_findings.find({}, {"_id": 0}))
-    department = list(db.department_absorption.find({}, {"_id": 0}))
-
-    score = calculate_score(finance, audit, department)
-    return jsonify({
-        "score": score,
-        "generated_at": datetime.now().isoformat()
-    })
-
-# ----------------------------
-# Run the app
-# ----------------------------
 if __name__ == "__main__":
-    app.run(debug=True)
+    app = create_app()
+    app.run(host="0.0.0.0", port=5000, debug=True)
+
