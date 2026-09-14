@@ -25,13 +25,14 @@ def create_app() -> Flask:
     app.config["OLLAMA_HOST"]             = os.getenv("OLLAMA_HOST", "http://localhost:11434")
     app.config["OLLAMA_MODEL"]            = os.getenv("OLLAMA_MODEL", "qwen")
 
-    #  Extensions 
+    #  Extensions app
     JWTManager(app)
 
     #  Blueprints 
     app.register_blueprint(auth_bp,     url_prefix="/auth")
     app.register_blueprint(governor_bp,    url_prefix="/governor")
     app.register_blueprint(constituency_bp, url_prefix="/constituency")
+  
 
     #  Error handlers 
     @app.errorhandler(404)
@@ -52,4 +53,3 @@ def create_app() -> Flask:
 if __name__ == "__main__":
     app = create_app()
     app.run(host="0.0.0.0", port=5000, debug=True)
-

@@ -10,7 +10,6 @@ DB_NAME = "Accountability"
 # CONNECT TO MONGODB
 client = MongoClient("mongodb://localhost:27017")
 db = client[DB_NAME]
-
 # COLLECTIONS
 county_leaders = db["county_leaders"]
 county_finances = db["county_finances"]
