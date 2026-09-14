@@ -187,6 +187,11 @@ db["county_leaders"].create_index([("county_code", ASCENDING)])
 db["county_finances"].create_index([("county_code", ASCENDING)])
 db["county_audit"].create_index([("county_code", ASCENDING)])
 db["department_absorption"].create_index([("county_code", ASCENDING)])
+
+# Create AI cache collection indexes
+db["ai_cache"].create_index([("cache_key", ASCENDING)], unique=True)
+db["ai_cache"].create_index([("expires_at")], expireAfterSeconds=0)
+
 print("  All indexes created")
 
 # ============================

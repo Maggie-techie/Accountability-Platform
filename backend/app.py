@@ -11,6 +11,7 @@ from flask_jwt_extended import JWTManager
 from api.auth import auth_bp
 from api.constituency import constituency_bp
 from api.governors import governor_bp
+from api.ai_engine import ai_bp
 
 def create_app() -> Flask:
     app = Flask(__name__)
@@ -32,6 +33,7 @@ def create_app() -> Flask:
     app.register_blueprint(auth_bp,     url_prefix="/api/auth")
     app.register_blueprint(governor_bp,    url_prefix="/api/governor")
     app.register_blueprint(constituency_bp, url_prefix="/api/constituency")
+    app.register_blueprint(ai_bp,        url_prefix="/api/ai")
 
     #  Error handlers
     @app.errorhandler(404)

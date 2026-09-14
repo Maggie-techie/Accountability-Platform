@@ -20,9 +20,11 @@ files_to_check = [
     "backend/api/utils/utils.py",
     "backend/api/constituency.py",
     "backend/api/governors.py",
+    "backend/api/ai_engine.py",
     "backend/app.py",
     "extract_and_seed.py",
-    "governor_seed.py"
+    "governor_seed.py",
+    "warm_cache.py"
 ]
 
 all_good = True

@@ -106,11 +106,29 @@ All API endpoints are prefixed with `/api`
 - `GET /api/constituency/mps` - Get MP records
 - `GET /api/constituency/mps/<slug>` - Get MP by constituency
 
+### AI Engine
+- `POST /api/ai/mp/<slug>/risk_score` - AI risk scoring for constituency
+- `POST /api/ai/mp/<slug>/risk_level` - AI risk level analysis for constituency
+- `POST /api/ai/mp/<slug>/summary` - AI summary generation for constituency
+- `POST /api/ai/mp/<slug>/anomalies` - AI anomaly detection for constituency
+- `POST /api/ai/mp/<slug>/peer_rank` - AI peer ranking analysis for constituency
+- `POST /api/ai/mp/<slug>/citizen_actions` - AI citizen action recommendations for constituency
+- `POST /api/ai/mp/<slug>/data_sources` - AI data source analysis for constituency
+- `GET /api/ai/mp/<slug>/cached_at` - Cache timestamp information for constituency
+- `POST /api/ai/governor/fiscal_health` - AI fiscal health scoring for governor
+- `POST /api/ai/governor/dept_absorption` - AI department absorption analysis for governor
+- `POST /api/ai/governor/osr_analysis` - AI OSR analysis for governor
+- `POST /api/ai/governor/department_flags` - AI department flags analysis for governor
+- `POST /api/ai/governor/top_risks` - AI top risks and citizen actions for governor
+- `GET /api/ai/county/narrative` - AI county-level narrative analysis
+- `POST /api/ai/findings/classifier` - AI audit finding classifier
+- `POST /api/ai/compare` - AI cross-leader comparator
+
 ### Unified Endpoints
 - `GET /api/findings` - Get findings for both leaders (with filtering)
 - `GET /api/compare` - Compare two leaders
 
-See `API_DOCS.md` for complete API documentation with request/response examples.
+See `API_DOCS.md` and `AI_ENGINE.md` for complete API documentation with request/response examples.
 
 ## Data Model
 

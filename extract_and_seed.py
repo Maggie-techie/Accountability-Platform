@@ -274,6 +274,10 @@ db["mps"].create_index([("constituency_slug", ASCENDING)], unique=True)
 db["mps"].create_index([("oag_opinion", ASCENDING)])
 db["mps"].create_index([("county_code", ASCENDING)])
  
+# Create AI cache collection indexes
+db["ai_cache"].create_index([("cache_key", ASCENDING)], unique=True)
+db["ai_cache"].create_index([("expires_at")], expireAfterSeconds=0)
+
 print("  All indexes created")
 
 # STEP 5 — VERIFY
