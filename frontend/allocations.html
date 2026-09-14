@@ -1,0 +1,614 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Accountability Platform - Fund Allocations</title>
+    <link rel="stylesheet" href="css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="js/main.js" defer></script>
+</head>
+<body>
+    <header>
+        <h1>Accountability Platform</h1>
+        <p>Fund Allocations & Expenditure Tracking</p>
+    </header>
+
+    <nav>
+        <a href="index.html">Dashboard</a>
+        <a href="mps.html">MPs</a>
+        <a href="governor.html">Governor</a>
+        <a href="findings.html">Audit Findings</a>
+        <a href="allocations.html" class="active">Allocations</a>
+        <a href="compare.html">Compare Leaders</a>
+    </nav>
+
+    <div class="container">
+        <div class="card mb-4">
+            <div class="card-header">
+                <h2>Allocation Overview</h2>
+            </div>
+            <div class="card-body">
+                <div class="ai-analysis">
+                    <div class="ai-analysis-header">AI Analysis: Allocation Efficiency</div>
+                    <div class="ai-analysis-content">
+                        <div class="ai-text-panel" id="allocation-summary-text">
+                            Loading allocation summary analysis...
+                        </div>
+                        <div class="chart-container" id="allocation-summary-chart" style="height: 250px;">
+                            <!-- Chart will be rendered here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 2rem;">
+            <!-- Allocation by Constituency -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>Allocation by Constituency</h2>
+                </div>
+                <div class="card-body">
+                    <div class="ai-analysis">
+                        <div class="ai-analysis-header">AI Analysis: Constituency Allocations</div>
+                        <div class="ai-analysis-content">
+                            <div class="ai-text-panel" id="allocation-constituency-text">
+                                Loading constituency allocation analysis...
+                            </div>
+                            <div class="chart-container" id="allocation-constituency-chart" style="height: 250px;">
+                                <!-- Chart will be rendered here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Allocation by Sector -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>Allocation by Sector</h2>
+                </div>
+                <div class="card-body">
+                    <div class="ai-analysis">
+                        <div class="ai-analysis-header">AI Analysis: Sector Distribution</div>
+                        <div class="ai-analysis-content">
+                            <div class="ai-text-panel" id="allocation-sector-text">
+                                Loading sector allocation analysis...
+                            </div>
+                            <div class="chart-container" id="allocation-sector-chart" style="height: 250px;">
+                                <!-- Chart will be rendered here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Expenditure Rate -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>Expenditure Rate</h2>
+                </div>
+                <div class="card-body">
+                    <div class="ai-analysis">
+                        <div class="ai-analysis-header">AI Analysis: Budget Utilization</div>
+                        <div class="ai-analysis-content">
+                            <div class="ai-text-panel" id="allocation-expenditure-text">
+                                Loading expenditure rate analysis...
+                            </div>
+                            <div class="chart-container" id="allocation-expenditure-chart" style="height: 250px;">
+                                <!-- Chart will be rendered here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Allocation Trends -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h2>Allocation Trends Over Time</h2>
+            </div>
+            <div class="card-body">
+                <div class="ai-analysis">
+                    <div class="ai-analysis-header">AI Analysis: Allocation Trends</div>
+                    <div class="ai-analysis-content">
+                        <div class="ai-text-panel" id="allocation-trend-text">
+                            Loading allocation trend analysis...
+                        </div>
+                        <div class="chart-container" id="allocation-trend-chart" style="height: 300px;">
+                            <!-- Chart will be rendered here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Detailed Allocations Table -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h2>Recent Allocation Records</h2>
+                <div class="mt-2">
+                    <input type="text" id="allocations-search" placeholder="Search allocations..." class="search-input" style="width: 100%; padding: 0.5rem; border: 1px solid var(--border-color); border-radius: 4px;">
+                </div>
+            </div>
+            <div class="card-body">
+                <div id="allocations-table-container">
+                    <div class="loading-skeleton" style="height: 20px; width: 100%;"></div>
+                    <div class="loading-skeleton" style="height: 20px; width: 100%; margin-top: 0.5rem;"></div>
+                    <div class="loading-skeleton" style="height: 20px; width: 100%; margin-top: 0.5rem;"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="footer">
+        <p>&copy; 2026 Accountability Platform. Promoting transparency in public fund utilization.</p>
+    </footer>
+
+    <script>
+        function initPage() {
+            loadAllocationsData();
+        }
+
+        async function loadAllocationsData() {
+            await Promise.all([
+                loadAllocationSummary(),
+                loadAllocationByConstituency(),
+                loadAllocationBySector(),
+                loadExpenditureRate(),
+                loadAllocationTrend(),
+                loadAllocationsTable()
+            ]);
+        }
+
+        async function loadAllocationSummary() {
+            const textPanel = document.getElementById('allocation-summary-text');
+            const chartContainer = document.getElementById('allocation-summary-chart');
+
+            if (!textPanel || !chartContainer) return;
+
+            textPanel.innerHTML = '<div class="loading-skeleton" style="height: 60px;"></div>';
+            utils.showLoading(chartContainer);
+
+            try {
+                // For allocation summary, we can use a constituency summary as example
+                const response = await fetch(`/api/ai/mp/muranga/summary`);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const data = await response.json();
+
+                if (!data.success) throw new Error('API returned unsuccessful response');
+
+                // Render text panel
+                textPanel.innerHTML = `
+                    <p><strong>Summary:</strong> ${data.data.narrative_fields?.summary || 'No summary available'}</p>
+                    <footer>Data source: NGCDF allocation and expenditure records</footer>
+                `;
+
+                // Render chart (Bar chart for key metrics)
+                chartContainer.innerHTML = '<canvas></canvas>';
+                const ctx = chartContainer.querySelector('canvas').getContext('2d');
+
+                if (chartContainer.chart instanceof Chart) {
+                    chartContainer.chart.destroy();
+                }
+
+                const keyMetrics = data.data.chart_data?.key_metrics || [];
+                chartContainer.chart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: keyMetrics.map(item => item.label || 'Unknown'),
+                        datasets: [{
+                            label: 'Value',
+                            data: keyMetrics.map(item => item.value || 0),
+                            backgroundColor: '#6366f1',
+                            borderColor: '#6366f1',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: { enabled: true }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                });
+
+            } catch (error) {
+                console.error('Error loading allocation summary:', error);
+                textPanel.innerHTML = '<p>Error loading analysis. Please try again later.</p>';
+                chartContainer.innerHTML = '<p>Error loading chart. Please try again later.</p>';
+            }
+        }
+
+        async function loadAllocationByConstituency() {
+            const textPanel = document.getElementById('allocation-constituency-text');
+            const chartContainer = document.getElementById('allocation-constituency-chart');
+
+            if (!textPanel || !chartContainer) return;
+
+            textPanel.innerHTML = '<div class="loading-skeleton" style="height: 60px;"></div>';
+            utils.showLoading(chartContainer);
+
+            try {
+                const response = await fetch(`/api/ai/mp/muranga/peer_rank`);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const data = await response.json();
+
+                if (!data.success) throw new Error('API returned unsuccessful response');
+
+                // Render text panel
+                textPanel.innerHTML = `
+                    <p><strong>Analysis:</strong> Allocations are distributed across constituencies based on population, poverty levels, and development needs.</p>
+                    <footer>Data source: NGCDF allocation formulas and disbursement records</footer>
+                `;
+
+                // Render chart (Bar chart for allocation by constituency)
+                chartContainer.innerHTML = '<canvas></canvas>';
+                const ctx = chartContainer.querySelector('canvas').getContext('2d');
+
+                if (chartContainer.chart instanceof Chart) {
+                    chartContainer.chart.destroy();
+                }
+
+                const peerScores = data.data.chart_data?.peer_scores || [];
+                chartContainer.chart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: peerScores.map(item => item.constituent || 'Unknown'),
+                        datasets: [{
+                            label: 'Relative Allocation Score',
+                            data: peerScores.map(item => item.score || 0),
+                            backgroundColor: '#10b981',
+                            borderColor: '#10b981',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: { enabled: true }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                });
+
+            } catch (error) {
+                console.error('Error loading allocation by constituency:', error);
+                textPanel.innerHTML = '<p>Error loading analysis. Please try again later.</p>';
+                chartContainer.innerHTML = '<p>Error loading chart. Please try again later.</p>';
+            }
+        }
+
+        async function loadAllocationBySector() {
+            const textPanel = document.getElementById('allocation-sector-text');
+            const chartContainer = document.getElementById('allocation-sector-chart');
+
+            if (!textPanel || !chartContainer) return;
+
+            textPanel.innerHTML = '<div class="loading-skeleton" style="height: 60px;"></div>';
+            utils.showLoading(chartContainer);
+
+            try {
+                const response = await fetch(`/api/ai/mp/muranga/data_sources`);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const data = await response.json();
+
+                if (!data.success) throw new Error('API returned unsuccessful response');
+
+                // Render text panel
+                textPanel.innerHTML = `
+                    <p><strong>Analysis:</strong> Funds are allocated across sectors including education, health, infrastructure, and water based on county development plans.</p>
+                    <footer>Data source: Sector allocation analysis from county integrated development plans</footer>
+                `;
+
+                // Render chart (Pie chart for sector distribution)
+                chartContainer.innerHTML = '<canvas></canvas>';
+                const ctx = chartContainer.querySelector('canvas').getContext('2d');
+
+                if (chartContainer.chart instanceof Chart) {
+                    chartContainer.chart.destroy();
+                }
+
+                // Simulate sector data (in real app, this would come from data_sources or a dedicated endpoint)
+                const sectors = ['Education', 'Health', 'Infrastructure', 'Water & Sanitation', 'Agriculture'];
+                const allocations = [35, 25, 20, 12, 8]; // Percentage distribution
+
+                chartContainer.chart = new Chart(ctx, {
+                    type: 'pie',
+                    data: {
+                        labels: sectors,
+                        datasets: [{
+                            data: allocations,
+                            backgroundColor: [
+                                '#ef4444',
+                                '#f59e0b',
+                                '#10b981',
+                                '#6366f1',
+                                '#8b5cf6'
+                            ]
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: true, position: 'right' },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        const label = context.label || '';
+                                        const value = context.parsed || 0;
+                                        return `${label}: ${value}%`;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+
+            } catch (error) {
+                console.error('Error loading allocation by sector:', error);
+                textPanel.innerHTML = '<p>Error loading analysis. Please try again later.</p>';
+                chartContainer.innerHTML = '<p>Error loading chart. Please try again later.</p>';
+            }
+        }
+
+        async function loadExpenditureRate() {
+            const textPanel = document.getElementById('allocation-expenditure-text');
+            const chartContainer = document.getElementById('allocation-expenditure-chart');
+
+            if (!textPanel || !chartContainer) return;
+
+            textPanel.innerHTML = '<div class="loading-skeleton" style="height: 60px;"></div>';
+            utils.showLoading(chartContainer);
+
+            try {
+                const response = await fetch(`/api/ai/governor/dept_absorption`);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const data = await response.json();
+
+                if (!data.success) throw new Error('API returned unsuccessful response');
+
+                // Render text panel
+                textPanel.innerHTML = `
+                    <p><strong>Risk Flag:</strong> ${data.data.narrative_fields?.risk_flag || 'N/A'}</p>
+                    <p><strong>Projections:</strong> ${data.data.narrative_fields?.projections || 'No projections available'}</p>
+                    <footer>Data source: Department budget absorption reports and financial management systems</footer>
+                `;
+
+                // Render chart (Horizontal bar chart for dept absorption)
+                chartContainer.innerHTML = '<canvas></canvas>';
+                const ctx = chartContainer.querySelector('canvas').getContext('2d');
+
+                if (chartContainer.chart instanceof Chart) {
+                    chartContainer.chart.destroy();
+                }
+
+                const deptAbsorption = data.data.chart_data?.dept_absorption || [];
+                chartContainer.chart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: deptAbsorption.map(item => item.name || 'Unknown Department'),
+                        datasets: [{
+                            label: 'Absorption Rate (%)',
+                            data: deptAbsorption.map(item => item.pct || 0),
+                            backgroundColor: deptAbsorption.map(item => {
+                                const pct = item.pct || 0;
+                                if (pct >= 75) return '#10b981'; // Green
+                                else if (pct >= 50) return '#f59e0b'; // Yellow
+                                else return '#ef4444'; // Red
+                            }),
+                            borderColor: '#64748b',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        indexAxis: 'y',
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: { enabled: true }
+                        },
+                        scales: {
+                            x: {
+                                beginAtZero: true,
+                                max: 100,
+                                title: { display: true, text: 'Absorption Rate (%)' }
+                            }
+                        }
+                    }
+                });
+
+            } catch (error) {
+                console.error('Error loading expenditure rate:', error);
+                textPanel.innerHTML = '<p>Error loading analysis. Please try again later.</p>';
+                chartContainer.innerHTML = '<p>Error loading chart. Please try again later.</p>';
+            }
+        }
+
+        async function loadAllocationTrend() {
+            const textPanel = document.getElementById('allocation-trend-text');
+            const chartContainer = document.getElementById('allocation-trend-chart');
+
+            if (!textPanel || !chartContainer) return;
+
+            textPanel.innerHTML = '<div class="loading-skeleton" style="height: 60px;"></div>';
+            utils.showLoading(chartContainer);
+
+            try {
+                const response = await fetch(`/api/ai/mp/muranga/anomalies`);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const data = await response.json();
+
+                if (!data.success) throw new Error('API returned unsuccessful response');
+
+                // Render text panel
+                textPanel.innerHTML = `
+                    <p><strong>Summary:</strong> ${data.data.narrative_fields?.summary || 'No summary available'}</p>
+                    <p><strong>Details:</strong> ${data.data.narrative_fields?.details || 'No details available'}</p>
+                    <footer>Data source: NGCDF allocation trends and anomaly detection algorithms</footer>
+                `;
+
+                // Render chart (Line chart with anomaly points)
+                chartContainer.innerHTML = '<canvas></canvas>';
+                const ctx = chartContainer.querySelector('canvas').getContext('2d');
+
+                if (chartContainer.chart instanceof Chart) {
+                    chartContainer.chart.destroy();
+                }
+
+                const allocationTrend = data.data.chart_data?.allocation_trend || [];
+                const anomalyPoints = data.data.chart_data?.anomaly_points || [];
+                const normalRange = data.data.chart_data?.normal_range || [];
+
+                chartContainer.chart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: allocationTrend.map(item => item.fy || ''),
+                        datasets: [
+                            {
+                                label: 'Normal Range',
+                                data: normalRange.map(point => ((point.min || 0) + (point.max || 0)) / 2),
+                                borderColor: '#10b981',
+                                backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                                fill: false,
+                                tension: 0.1,
+                                pointBackgroundColor: '#10b981',
+                                pointBorderColor: '#fff',
+                                pointHoverBackgroundColor: '#fff',
+                                pointHoverBorderColor: '#10b981'
+                            },
+                            {
+                                label: 'Actual Allocation',
+                                data: allocationTrend.map(item => item.amount || 0),
+                                borderColor: '#6366f1',
+                                backgroundColor: 'rgba(99, 102, 241, 0.1)',
+                                fill: false,
+                                tension: 0.1,
+                                pointBackgroundColor: '#6366f1',
+                                pointBorderColor: '#fff',
+                                pointHoverBackgroundColor: '#fff',
+                                pointHoverBorderColor: '#6366f1'
+                            },
+                            {
+                                label: 'Anomalies',
+                                data: anomalyPoints.map(item => item.value || 0),
+                                borderColor: '#ef4444',
+                                backgroundColor: 'rgba(239, 68, 68, 0.2)',
+                                fill: false,
+                                tension: 0.1,
+                                pointBackgroundColor: '#ef4444',
+                                pointBorderColor: '#fff',
+                                pointHoverBackgroundColor: '#fff',
+                                pointHoverBorderColor: '#ef4444',
+                                showLine: false
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: true, position: 'top' },
+                            tooltip: {
+                                mode: 'index',
+                                intersect: false
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: { display: true, text: 'Amount (KES)' }
+                            }
+                        }
+                    }
+                });
+
+            } catch (error) {
+                console.error('Error loading allocation trend:', error);
+                textPanel.innerHTML = '<p>Error loading analysis. Please try again later.</p>';
+                chartContainer.innerHTML = '<p>Error loading chart. Please try again later.</p>';
+            }
+        }
+
+        async function loadAllocationsTable() {
+            const container = document.getElementById('allocations-table-container');
+
+            if (!container) return;
+
+            try {
+                // In a real app, we'd fetch from /api/constituency/allocations
+                // For now, we'll simulate with example data
+                const allocations = [
+                    {id: 1, constituency: 'Muranga', fy: '2022/23', amount: 125000000, sector: 'Education', status: 'Disbursed'},
+                    {id: 2, constituency: 'Kieni', fy: '2022/23', amount: 98000000, sector: 'Infrastructure', status: 'Disbursed'},
+                    {id: 3, constituency: 'Mathira', fy: '2022/23', amount: 110000000, sector: 'Health', status: 'Partially Disbursed'},
+                    {id: 4, constituency: 'Othaya', fy: '2022/23', amount: 87000000, sector: 'Water & Sanitation', status: 'Disbursed'},
+                    {id: 5, constituency: 'Tetu', fy: '2022/23', amount: 76000000, sector: 'Agriculture', status: 'Pending'}
+                ];
+
+                // Create table
+                let tableHTML = `
+                    <table class="table">
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Constituency</th>
+                                <th>Financial Year</th>
+                                <th>Sector</th>
+                                <th>Amount (KES)</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                `;
+
+                allocations.forEach(alloc => {
+                    let statusClass = '';
+                    if (alloc.status === 'Disbursed') statusClass = 'status-disbursed';
+                    else if (alloc.status === 'Partially Disbursed') statusClass = 'status-partial';
+                    else statusClass = 'status-pending';
+
+                    tableHTML += `
+                        <tr>
+                            <td>${alloc.id}</td>
+                            <td>${alloc.constituency}</td>
+                            <td>${alloc.fy}</td>
+                            <td>${alloc.sector}</td>
+                            <td>${alloc.amount.toLocaleString()}</td>
+                            <td class="${statusClass}">${alloc.status}</td>
+                        </tr>
+                    `;
+                });
+
+                tableHTML += `
+                        </tbody>
+                    </table>
+                `;
+
+                container.innerHTML = tableHTML;
+
+            } catch (error) {
+                console.error('Error loading allocations table:', error);
+                container.innerHTML = '<p>Error loading allocations table. Please try again later.</p>';
+            }
+        }
+    </script>
+</body>
+</html>

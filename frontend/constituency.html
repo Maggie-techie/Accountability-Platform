@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Accountability Platform - Constituency</title>
+    <link rel="stylesheet" href="css/style.css">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="js/main.js" defer></script>
+</head>
+<body>
+    <header>
+        <h1>Accountability Platform</h1>
+        <p>Constituency Development Fund Details</p>
+    </header>
+
+    <nav>
+        <a href="index.html">Dashboard</a>
+        <a href="mps.html">MPs</a>
+        <a href="governor.html">Governor</a>
+        <a href="findings.html">Audit Findings</a>
+        <a href="allocations.html">Allocations</a>
+        <a href="compare.html">Compare Leaders</a>
+    </nav>
+
+    <div class="container">
+        <!-- Constituency Info Header -->
+        <div class="card mb-4">
+            <div class="card-body text-center">
+                <h1 id="constituency-name">Muranga Constituency</h1>
+                <p id="constituency-info">NGCDF Allocation & Expenditure Analysis</p>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="row" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 2rem;">
+            <!-- Risk Score Card -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>Risk Assessment</h2>
+                </div>
+                <div class="card-body">
+                    <div class="ai-analysis">
+                        <div class="ai-analysis-header">AI Analysis: Risk Score</div>
+                        <div class="ai-analysis-content">
+                            <div class="ai-text-panel" id="risk-score-text">
+                                Loading risk score analysis...
+                            </div>
+                            <div class="chart-container" id="risk-score-chart" style="height: 250px;">
+                                <!-- Chart will be rendered here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Peer Rank Card -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>Peer Comparison</h2>
+                </div>
+                <div class="card-body">
+                    <div class="ai-analysis">
+                        <div class="ai-analysis-header">AI Analysis: Peer Ranking</div>
+                        <div class="ai-analysis-content">
+                            <div class="ai-text-panel" id="peer-rank-text">
+                                Loading peer rank analysis...
+                            </div>
+                            <div class="chart-container" id="peer-rank-chart" style="height: 250px;">
+                                <!-- Chart will be rendered here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Citizen Actions Card -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>Citizen Engagement</h2>
+                </div>
+                <div class="card-body">
+                    <div class="ai-analysis">
+                        <div class="ai-analysis-header">AI Analysis: Citizen Actions</div>
+                        <div class="ai-analysis-content">
+                            <div class="ai-text-panel" id="citizen-actions-text">
+                                Loading citizen actions analysis...
+                            </div>
+                            <div class="chart-container" id="citizen-actions-chart" style="height: 250px;">
+                                <!-- Chart will be rendered here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Data Sources Card -->
+            <div class="card">
+                <div class="card-header">
+                    <h2>Data Quality</h2>
+                </div>
+                <div class="card-body">
+                    <div class="ai-analysis">
+                        <div class="ai-analysis-header">AI Analysis: Data Sources</div>
+                        <div class="ai-analysis-content">
+                            <div class="ai-text-panel" id="data-sources-text">
+                                Loading data sources analysis...
+                            </div>
+                            <div class="chart-container" id="data-sources-chart" style="height: 250px;">
+                                <!-- Chart will be rendered here -->
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Allocation Trends -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h2>Allocation Trends Over Time</h2>
+            </div>
+            <div class="card-body">
+                <div class="ai-analysis">
+                    <div class="ai-analysis-header">AI Analysis: Allocation Trends</div>
+                    <div class="ai-analysis-content">
+                        <div class="ai-text-panel" id="allocation-trend-text">
+                            Loading allocation trend analysis...
+                        </div>
+                        <div class="chart-container" id="allocation-trend-chart" style="height: 300px;">
+                            <!-- Chart will be rendered here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Anomalies Detection -->
+        <div class="card mt-4">
+            <div class="card-header">
+                <h2>Anomalies Detection</h2>
+            </div>
+            <div class="card-body">
+                <div class="ai-analysis">
+                    <div class="ai-analysis-header">AI Analysis: Financial Anomalies</div>
+                    <div class="ai-analysis-content">
+                        <div class="ai-text-panel" id="anomalies-text">
+                            Loading anomalies analysis...
+                        </div>
+                        <div class="chart-container" id="anomalies-chart" style="height: 300px;">
+                            <!-- Chart will be rendered here -->
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="footer">
+        <p>&copy; 2026 Accountability Platform. Promoting transparency in public fund utilization.</p>
+    </footer>
+
+    <script>
+        // Get constituency slug from URL or use default
+        const urlParams = new URLSearchParams(window.location.search);
+        const constituencySlug = urlParams.get('slug') || 'muranga';
+        const constituencyName = urlParams.get('name') || 'Muranga';
+
+        // Set constituency name in header
+        document.getElementById('constituency-name').textContent = `${constituencyName} Constituency`;
+        document.getElementById('constituency-info').textContent = `NGCDF Allocation & Expenditure Analysis`;
+
+        function initPage() {
+            loadAllAnalyses();
+        }
+
+        async function loadAllAnalyses() {
+            // Load all AI analyses for this constituency
+            await Promise.all([
+                loadRiskScore(),
+                loadPeerRank(),
+                loadCitizenActions(),
+                loadDataSources(),
+                loadAllocationTrend(),
+                loadAnomalies()
+            ]);
+        }
+
+        async function loadRiskScore() {
+            const textPanel = document.getElementById('risk-score-text');
+            const chartContainer = document.getElementById('risk-score-chart');
+
+            if (!textPanel || !chartContainer) return;
+
+            textPanel.innerHTML = '<div class="loading-skeleton" style="height: 60px;"></div>';
+            utils.showLoading(chartContainer);
+
+            try {
+                const response = await fetch(`/api/ai/mp/${constituencySlug}/risk_score`);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const data = await response.json();
+
+                if (!data.success) throw new Error('API returned unsuccessful response');
+
+                // Render text panel
+                textPanel.innerHTML = `
+                    <p><strong>Risk Level:</strong> ${data.data.narrative_fields?.risk_level || 'N/A'}</p>
+                    <p><strong>Summary:</strong> ${data.data.narrative_fields?.summary || 'No summary available'}</p>
+                    <footer>Data source: NGCDF allocations, audit findings, and budget execution reports</footer>
+                `;
+
+                // Render chart (Gauge for risk score)
+                chartContainer.innerHTML = '<canvas></canvas>';
+                const ctx = chartContainer.querySelector('canvas').getContext('2d');
+
+                if (chartContainer.chart instanceof Chart) {
+                    chartContainer.chart.destroy();
+                }
+
+                const riskScore = data.data.chart_data?.risk_score || 50;
+                let color = '#10b981';
+                if (riskScore >= 70) color = '#ef4444';
+                else if (riskScore >= 40) color = '#f59e0b';
+
+                chartContainer.chart = new Chart(ctx, {
+                    type: 'doughnut',
+                    data: {
+                        labels: ['Risk Score', 'Remaining'],
+                        datasets: [{
+                            data: [riskScore, 100 - riskScore],
+                            backgroundColor: [color, '#e2e8f0'],
+                            borderWidth: 0
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        cutout: '70%',
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: { enabled: true }
+                        }
+                    }
+                });
+
+            } catch (error) {
+                console.error('Error loading risk score:', error);
+                textPanel.innerHTML = '<p>Error loading analysis. Please try again later.</p>';
+                chartContainer.innerHTML = '<p>Error loading chart. Please try again later.</p>';
+            }
+        }
+
+        async function loadPeerRank() {
+            const textPanel = document.getElementById('peer-rank-text');
+            const chartContainer = document.getElementById('peer-rank-chart');
+
+            if (!textPanel || !chartContainer) return;
+
+            textPanel.innerHTML = '<div class="loading-skeleton" style="height: 60px;"></div>';
+            utils.showLoading(chartContainer);
+
+            try {
+                const response = await fetch(`/api/ai/mp/${constituencySlug}/peer_rank`);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const data = await response.json();
+
+                if (!data.success) throw new Error('API returned unsuccessful response');
+
+                // Render text panel
+                textPanel.innerHTML = `
+                    <p><strong>Ranking Explanation:</strong> ${data.data.narrative_fields?.ranking_explanation || 'N/A'}</p>
+                    <p><strong>Insights:</strong> ${data.data.narrative_fields?.insights || 'No insights available'}</p>
+                    <footer>Data source: Peer constituency performance metrics</footer>
+                `;
+
+                // Render chart (Bar chart for peer scores)
+                chartContainer.innerHTML = '<canvas></canvas>';
+                const ctx = chartContainer.querySelector('canvas').getContext('2d');
+
+                if (chartContainer.chart instanceof Chart) {
+                    chartContainer.chart.destroy();
+                }
+
+                const peerScores = data.data.chart_data?.peer_scores || [];
+                chartContainer.chart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: peerScores.map(item => item.constituent || 'Unknown'),
+                        datasets: [{
+                            label: 'Performance Score',
+                            data: peerScores.map(item => item.score || 0),
+                            backgroundColor: '#6366f1',
+                            borderColor: '#6366f1',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: { mode: 'index', intersect: false }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                max: 100
+                            }
+                        }
+                    }
+                });
+
+            } catch (error) {
+                console.error('Error loading peer rank:', error);
+                textPanel.innerHTML = '<p>Error loading analysis. Please try again later.</p>';
+                chartContainer.innerHTML = '<p>Error loading chart. Please try again later.</p>';
+            }
+        }
+
+        async function loadCitizenActions() {
+            const textPanel = document.getElementById('citizen-actions-text');
+            const chartContainer = document.getElementById('citizen-actions-chart');
+
+            if (!textPanel || !chartContainer) return;
+
+            textPanel.innerHTML = '<div class="loading-skeleton" style="height: 60px;"></div>';
+            utils.showLoading(chartContainer);
+
+            try {
+                const response = await fetch(`/api/ai/mp/${constituencySlug}/citizen_actions`);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const data = await response.json();
+
+                if (!data.success) throw new Error('API returned unsuccessful response');
+
+                // Render text panel
+                textPanel.innerHTML = `
+                    <p><strong>Recommended Actions:</strong> ${data.data.narrative_fields?.recommended_actions || 'No recommendations available'}</p>
+                    <p><strong>Priority Level:</strong> ${data.data.narrative_fields?.priority_level || 'Medium'}</p>
+                    <footer>Data source: Audit findings, risk assessments, and public interest reports</footer>
+                `;
+
+                // Render chart (Bubble chart for action effectiveness)
+                chartContainer.innerHTML = '<canvas></canvas>';
+                const ctx = chartContainer.querySelector('canvas').getContext('2d');
+
+                if (chartContainer.chart instanceof Chart) {
+                    chartContainer.chart.destroy();
+                }
+
+                const actionEffectiveness = data.data.chart_data?.action_effectiveness || [];
+                chartContainer.chart = new Chart(ctx, {
+                    type: 'bubble',
+                    data: {
+                        datasets: [{
+                            label: 'Action Effectiveness',
+                            data: actionEffectiveness.map(item => ({
+                                x: item.effectiveness || 50,
+                                y: item.cost || 50,
+                                r: Math.max(5, Math.min(20, (item.effectiveness || 50) / 10))
+                            })),
+                            backgroundColor: 'rgba(99, 102, 241, 0.6)',
+                            borderColor: '#6366f1',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        const point = context.parsed;
+                                        const action = actionEffectiveness[context.dataIndex] || {};
+                                        return `Action: ${action.action || 'Unknown'}\nEffectiveness: ${point.x}%\nCost: $${point.y}k`;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                type: 'linear',
+                                position: 'bottom',
+                                title: { display: true, text: 'Effectiveness (%)' },
+                                min: 0,
+                                max: 100
+                            },
+                            y: {
+                                title: { display: true, text: 'Cost (USD thousands)' },
+                                min: 0
+                            }
+                        }
+                    }
+                });
+
+            } catch (error) {
+                console.error('Error loading citizen actions:', error);
+                textPanel.innerHTML = '<p>Error loading analysis. Please try again later.</p>';
+                chartContainer.innerHTML = '<p>Error loading chart. Please try again later.</p>';
+            }
+        }
+
+        async function loadDataSources() {
+            const textPanel = document.getElementById('data-sources-text');
+            const chartContainer = document.getElementById('data-sources-chart');
+
+            if (!textPanel || !chartContainer) return;
+
+            textPanel.innerHTML = '<div class="loading-skeleton" style="height: 60px;"></div>';
+            utils.showLoading(chartContainer);
+
+            try {
+                const response = await fetch(`/api/ai/mp/${constituencySlug}/data_sources`);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const data = await response.json();
+
+                if (!data.success) throw new Error('API returned unsuccessful response');
+
+                // Render text panel
+                textPanel.innerHTML = `
+                    <p><strong>Data Quality Assessment:</strong> ${data.data.narrative_fields?.data_quality_assessment || 'N/A'}</p>
+                    <p><strong>Source Reliability:</strong> ${data.data.narrative_fields?.source_reliability || 'N/A'}</p>
+                    <footer>Data source: Metadata analysis of NGCDF financial systems</footer>
+                `;
+
+                // Render chart (Radar chart for source scores)
+                chartContainer.innerHTML = '<canvas></canvas>';
+                const ctx = chartContainer.querySelector('canvas').getContext('2d');
+
+                if (chartContainer.chart instanceof Chart) {
+                    chartContainer.chart.destroy();
+                }
+
+                const sourceScores = data.data.chart_data?.source_scores || [];
+                chartContainer.chart = new Chart(ctx, {
+                    type: 'radar',
+                    data: {
+                        labels: sourceScores.map(item => item.source || 'Unknown Source'),
+                        datasets: [{
+                            label: 'Source Reliability & Completeness',
+                            data: sourceScores.map(item => ({
+                                reliability: item.reliability || 0,
+                                completeness: item.completeness || 0
+                            })),
+                            backgroundColor: 'rgba(99, 102, 241, 0.2)',
+                            borderColor: '#6366f1',
+                            pointBackgroundColor: '#6366f1',
+                            pointBorderColor: '#fff',
+                            pointHoverBackgroundColor: '#fff',
+                            pointHoverBorderColor: '#6366f1'
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: true, position: 'top' },
+                            tooltip: {
+                                callbacks: {
+                                    label: function(context) {
+                                        const point = context.parsed;
+                                        const index = context.dataIndex;
+                                        const source = sourceScores[index] || {};
+                                        return `${source.source || 'Unknown'}: Reliability ${point.reliability}%, Completeness ${point.completeness}%`;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            r: {
+                                angleLines: { display: false },
+                                suggestedMin: 0,
+                                suggestedMax: 100
+                            }
+                        }
+                    }
+                });
+
+            } catch (error) {
+                console.error('Error loading data sources:', error);
+                textPanel.innerHTML = '<p>Error loading analysis. Please try again later.</p>';
+                chartContainer.innerHTML = '<p>Error loading chart. Please try again later.</p>';
+            }
+        }
+
+        async function loadAllocationTrend() {
+            const textPanel = document.getElementById('allocation-trend-text');
+            const chartContainer = document.getElementById('allocation-trend-chart');
+
+            if (!textPanel || !chartContainer) return;
+
+            textPanel.innerHTML = '<div class="loading-skeleton" style="height: 60px;"></div>';
+            utils.showLoading(chartContainer);
+
+            try {
+                const response = await fetch(`/api/ai/mp/${constituencySlug}/summary`);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const data = await response.json();
+
+                if (!data.success) throw new Error('API returned unsuccessful response');
+
+                // Render text panel
+                textPanel.innerHTML = `
+                    <p><strong>Summary:</strong> ${data.data.narrative_fields?.summary || 'No summary available'}</p>
+                    <footer>Data source: NGCDF allocation records and expenditure reports</footer>
+                `;
+
+                // Render chart (Line chart for allocation trend)
+                chartContainer.innerHTML = '<canvas></canvas>';
+                const ctx = chartContainer.querySelector('canvas').getContext('2d');
+
+                if (chartContainer.chart instanceof Chart) {
+                    chartContainer.chart.destroy();
+                }
+
+                const allocationTrend = data.data.chart_data?.allocation_trend || [];
+                chartContainer.chart = new Chart(ctx, {
+                    type: 'line',
+                    data: {
+                        labels: allocationTrend.map(item => item.fy || ''),
+                        datasets: [{
+                            label: 'Allocation Amount (KES Millions)',
+                            data: allocationTrend.map(item => (item.amount || 0) / 1000000),
+                            fill: false,
+                            borderColor: '#10b981',
+                            backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                            tension: 0.1,
+                            pointBackgroundColor: '#10b981',
+                            pointBorderColor: '#fff',
+                            pointHoverBackgroundColor: '#fff',
+                            pointHoverBorderColor: '#10b981'
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: false },
+                            tooltip: {
+                                mode: 'index',
+                                intersect: false,
+                                callbacks: {
+                                    label: function(context) {
+                                        const value = context.parsed.y;
+                                        return `KES ${value.toFixed(1)}M`;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                title: { display: true, text: 'Amount (KES Millions)' }
+                            }
+                        }
+                    }
+                });
+
+            } catch (error) {
+                console.error('Error loading allocation trend:', error);
+                textPanel.innerHTML = '<p>Error loading analysis. Please try again later.</p>';
+                chartContainer.innerHTML = '<p>Error loading chart. Please try again later.</p>';
+            }
+        }
+
+        async function loadAnomalies() {
+            const textPanel = document.getElementById('anomalies-text');
+            const chartContainer = document.getElementById('anomalies-chart');
+
+            if (!textPanel || !chartContainer) return;
+
+            textPanel.innerHTML = '<div class="loading-skeleton" style="height: 60px;"></div>';
+            utils.showLoading(chartContainer);
+
+            try {
+                const response = await fetch(`/api/ai/mp/${constituencySlug}/anomalies`);
+                if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+                const data = await response.json();
+
+                if (!data.success) throw new Error('API returned unsuccessful response');
+
+                // Render text panel
+                textPanel.innerHTML = `
+                    <p><strong>Summary:</strong> ${data.data.narrative_fields?.summary || 'No summary available'}</p>
+                    <p><strong>Details:</strong> ${data.data.narrative_fields?.details || 'No details available'}</p>
+                    <footer>Data source: Audit findings, financial transactions, and budget execution records</footer>
+                `;
+
+                // Render chart (Scatter plot for anomalies)
+                chartContainer.innerHTML = '<canvas></canvas>';
+                const ctx = chartContainer.querySelector('canvas').getContext('2d');
+
+                if (chartContainer.chart instanceof Chart) {
+                    chartContainer.chart.destroy();
+                }
+
+                const anomalyPoints = data.data.chart_data?.anomaly_points || [];
+                const normalRange = data.data.chart_data?.normal_range || [];
+
+                chartContainer.chart = new Chart(ctx, {
+                    type: 'scatter',
+                    data: {
+                        datasets: [
+                            {
+                                label: 'Normal Range',
+                                data: normalRange.map(point => ({
+                                    x: new Date(point.fy || '2022-01-01').getTime(),
+                                    y: (point.min || 0) + ((point.max || 100) - (point.min || 0)) / 2
+                                })),
+                                backgroundColor: 'rgba(16, 185, 129, 0.1)',
+                                borderColor: '#10b981',
+                                pointBackgroundColor: '#10b981',
+                                pointBorderColor: '#fff',
+                                pointHoverBackgroundColor: '#fff',
+                                pointHoverBorderColor: '#10b981'
+                            },
+                            {
+                                label: 'Anomalies Detected',
+                                data: anomalyPoints.map(point => ({
+                                    x: new Date(point.fy || '2022-01-01').getTime(),
+                                    y: point.value || 0
+                                })),
+                                backgroundColor: 'rgba(239, 68, 68, 0.6)',
+                                borderColor: '#ef4444',
+                                pointBackgroundColor: '#ef4444',
+                                pointBorderColor: '#fff',
+                                pointHoverBackgroundColor: '#fff',
+                                pointHoverBorderColor: '#ef4444'
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: { display: true, position: 'top' },
+                            tooltip: {
+                                mode: 'nearest',
+                                callbacks: {
+                                    label: function(context) {
+                                        const point = context.parsed;
+                                        const date = new Date(point.x);
+                                        const datasetIndex = context.datasetIndex;
+                                        const datasetLabel = context.chart.data.datasets[datasetIndex].label || '';
+                                        const value = point.y;
+                                        return `${datasetLabel}: FY ${date.getFullYear()}: ${value.toFixed(2)}`;
+                                    }
+                                }
+                            }
+                        },
+                        scales: {
+                            x: {
+                                type: 'time',
+                                time: {
+                                    unit: 'year'
+                                },
+                                title: { display: true, text: 'Fiscal Year' }
+                            },
+                            y: {
+                                title: { display: true, text: 'Value (KES)' },
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                });
+
+            } catch (error) {
+                console.error('Error loading anomalies:', error);
+                textPanel.innerHTML = '<p>Error loading analysis. Please try again later.</p>';
+                chartContainer.innerHTML = '<p>Error loading chart. Please try again later.</p>';
+            }
+        }
+    </script>
+</body>
+</html>

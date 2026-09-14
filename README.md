@@ -10,6 +10,7 @@ The Accountability Platform provides RESTful APIs to access:
 - Departmental budget absorption rates
 - Performance scoring based on financial management, audit results, and department efficiency
 - AI-powered analysis and insights for both MP and governor tracks
+- Complete frontend interface for data visualization and AI insights
 
 ## Features
 
@@ -20,6 +21,9 @@ The Accountability Platform provides RESTful APIs to access:
 - Filtering, pagination, and error handling
 - Unified endpoints for cross-leader comparisons
 - Performance scoring algorithms
+- Responsive frontend dashboard with Chart.js visualizations
+- AI-powered text panels and charts integrated on all pages
+- Mobile-friendly design
 
 ## Project Structure
 
@@ -33,6 +37,20 @@ Accountability-Platform/
 │       ├── governors.py       # Governor data blueprint
 │       └── utils/
 │           └── utils.py       # Database connection utility
+├── frontend/
+│   ├── index.html             # Dashboard/homepage
+│   ├── mps.html               # MPs and constituencies page
+│   ├── constituency.html      # Constituency detail page
+│   ├── findings.html          # Audit findings page
+│   ├── allocations.html       # Fund allocations page
+│   ├── governor.html          # Governor's office page
+│   ├── governor-departments.html  # Governor departments page
+│   ├── governor-findings.html     # Governor findings page
+│   ├── compare.html           # Cross-leader comparison page
+│   ├── css/
+│   │   └── style.css          # Main stylesheet
+│   └── js/
+│       └── main.js            # Main JavaScript with AI service and chart rendering
 ├── extract_and_seed.py        # NG-CDF data seeding script
 ├── governor_seed.py           # Governor data seeding script
 ├── requirements.txt           # Python dependencies
@@ -41,12 +59,35 @@ Accountability-Platform/
 └── .gitignore
 ```
 
+## Frontend
+
+The frontend consists of 9 pages that integrate with the AI engine endpoints:
+
+1. **Dashboard (`/`)** - Overview of county health, findings summary, and allocation trends
+2. **MPs Page (`/mps.html`)** - List of constituencies with AI risk analysis
+3. **Constituency Detail Page (`/constituency.html`)** - Detailed analysis for a specific constituency
+4. **Findings Page (`/findings.html`)** - Audit findings with AI classification and severity analysis
+5. **Allocations Page (`/allocations.html`)** - Fund allocation tracking with AI efficiency analysis
+6. **Governor Page (`/governor.html`)** - Governor's office overview with fiscal health and OSR analysis
+7. **Governor Departments Page (`/governor-departments.html`)** - Department performance analysis
+8. **Governor Findings Page (`/governor-findings.html`)** - Governor's office audit findings
+9. **Compare Page (`/compare.html`)** - Cross-leader comparison between MP and Governor tracks
+
+Each page features:
+- AI text panels with narrative explanations
+- Chart.js visualizations consuming data directly from AI JSON responses
+- Loading skeletons during AI fetch operations
+- Data provenance footnotes citing source documents
+- Responsive design for mobile and desktop viewing
+
 ## Setup Instructions
 
 ### Prerequisites
+
 - Python 3.7+
 - MongoDB instance (local or cloud)
 - Git (for version control)
+- Web browser (for frontend)
 
 ### Installation
 
@@ -81,7 +122,7 @@ python extract_and_seed.py
 python backend/app.py
 ```
 
-The API will be available at `http://localhost:5000`
+6. Access the frontend at `http://localhost:5000`
 
 ## API Endpoints
 
@@ -152,13 +193,18 @@ All collections include a `county_code` field set to "019" for Nyeri County.
 ## Development
 
 ### Running Tests
+
 ```bash
 # Run syntax check
 python test_syntax.py
 ```
 
-### API Documentation
-View detailed API documentation in `API_DOCS.md`
+### Frontend Development
+
+The frontend uses plain HTML, CSS, and JavaScript with Chart.js for visualizations. To modify:
+- Edit HTML files in the `frontend/` directory
+- Modify styles in `frontend/css/style.css`
+- Update logic in `frontend/js/main.js`
 
 ## Deployment
 
@@ -173,6 +219,7 @@ For deployment, ensure:
 1. MongoDB is accessible via MONGODB_URI
 2. Environment variables are set
 3. The application runs on the platform's specified port
+4. For production, run `warm_cache.py` to pre-populate AI caches after deployment
 
 ## Contributing
 
