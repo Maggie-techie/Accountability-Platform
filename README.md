@@ -9,6 +9,7 @@ The Accountability Platform provides RESTful APIs to access:
 - Governor's office finances and audit findings
 - Departmental budget absorption rates
 - Performance scoring based on financial management, audit results, and department efficiency
+- AI-powered analysis and insights for both MP and governor tracks
 
 ## Features
 
