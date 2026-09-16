@@ -187,7 +187,7 @@ for doc in constituency_docs:
             "fy_display":        label,
             "amount_kshm":        doc["allocations_ksm"][fy_key],
             "county":            "Nyeri",
-            "county_code":       "030",
+            "county_code":       "019",
         })
  
 print(f"Built {len(allocation_docs)} allocation documents")
@@ -225,7 +225,7 @@ for doc in constituency_docs:
         "constituency":                doc["name"],
         "constituency_slug":           doc["slug"],
         "county":                      "Nyeri",
-        "county_code":                 "030",
+        "county_code":                 "019",
         "total_allocation_kshm":        round(total, 2),
         "misappropriation_count":      len(doc["misappropriations"]),
         "correct_appropriation_count": len(doc["correct_appropriations"]),
@@ -259,17 +259,25 @@ print("\nCreating indexes...")
 db["constituencies"].create_index([("slug", ASCENDING)], unique=True)
 db["constituencies"].create_index([("audit_status", ASCENDING)])
 db["constituencies"].create_index([("name", TEXT), ("mp.name", TEXT)])
+db["constituencies"].create_index([("county_code", ASCENDING)])
  
 db["allocations"].create_index([("constituency_slug", ASCENDING), ("fy_key", ASCENDING)])
 db["allocations"].create_index([("fy_key", ASCENDING)])
+db["allocations"].create_index([("county_code", ASCENDING)])
  
 db["audit_findings"].create_index([("constituency_slug", ASCENDING)])
 db["audit_findings"].create_index([("finding_type", ASCENDING)])
 db["audit_findings"].create_index([("mp_name", TEXT), ("finding", TEXT)])
+db["audit_findings"].create_index([("county_code", ASCENDING)])
  
 db["mps"].create_index([("constituency_slug", ASCENDING)], unique=True)
 db["mps"].create_index([("oag_opinion", ASCENDING)])
+db["mps"].create_index([("county_code", ASCENDING)])
  
+# Create AI cache collection indexes
+db["ai_cache"].create_index([("cache_key", ASCENDING)], unique=True)
+db["ai_cache"].create_index([("expires_at")], expireAfterSeconds=0)
+
 print("  All indexes created")
 
 # STEP 5 — VERIFY

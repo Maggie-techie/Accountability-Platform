@@ -10,58 +10,50 @@ governor_bp = Blueprint("governor", __name__)
 # =========================
 @governor_bp.route("/governor", methods=["GET"])
 def get_governor():
-    db = get_db()
+    try:
+        db = get_db()
+        profile = db.county_leaders.find_one({}, {"_id": 0})
+        if not profile:
+            return jsonify({"error": "Governor profile not found"}), 404
+        return jsonify(profile), 200
+    except Exception as e:
+        return jsonify({"error": "Failed to retrieve governor profile", "details": str(e)}), 500
 
-    profile = db.governor.find({}, {"_id": 0})
-
-    return jsonify(list(profile))
-
-
-# =========================
-# COUNTY FINANCES
-# =========================
+# get county finances
 @governor_bp.route("/governor/finances", methods=["GET"])
 def get_finances():
-    db = get_db()
+    try:
+        db = get_db()
+        year = request.args.get("year")
+        query = {}
+        if year:
+            query["financial_year"] = year
+        data = list(db.county_finances.find(query, {"_id": 0}))
+        return jsonify(data), 200
+    except Exception as e:
+        return jsonify({"error": "Failed to retrieve finances", "details": str(e)}), 500
 
-    year = request.args.get("year")
-
-    query = {}
-    if year:
-        query["financial_year"] = year
-
-    data = list(db.county_finances.find(query, {"_id": 0}))
-
-    return jsonify(data)
-
-
-# =========================
-# DEPARTMENTS DATA
-# =========================
+# get departments data
 @governor_bp.route("/governor/departments", methods=["GET"])
 def get_departments():
-    db = get_db()
+    try:
+        db = get_db()
+        data = list(db.department_absorption.find({}, {"_id": 0}))
+        return jsonify(data), 200
+    except Exception as e:
+        return jsonify({"error": "Failed to retrieve departments", "details": str(e)}), 500
 
-    data = list(db.department_absorption.find({}, {"_id": 0}))
-
-    return jsonify(data)
-
-
-# =========================
-# AUDIT FINDINGS
-# =========================
+# get county audit findings
 @governor_bp.route("/governor/audit", methods=["GET"])
 def get_audit():
-    db = get_db()
+    try:
+        db = get_db()
+        data = list(db.county_audit_findings.find({}, {"_id": 0}))
+        return jsonify(data), 200
+    except Exception as e:
+        return jsonify({"error": "Failed to retrieve audit findings", "details": str(e)}), 500
 
-    data = list(db.county_audit_findings.find({}, {"_id": 0}))
-
-    return jsonify(data)
-
-
-# =========================
-# SCORING FUNCTION
-# =========================
+# scoring model
 def calculate_score(finance, audit, department):
     score = 0
 
@@ -81,20 +73,18 @@ def calculate_score(finance, audit, department):
     return round(score, 2)
 
 
-# =========================
-# GOVERNOR SCORE
-# =========================
 @governor_bp.route("/governor/score", methods=["GET"])
 def get_score():
-    db = get_db()
+    try:
+        db = get_db()
+        finance = list(db.county_finances.find({}, {"_id": 0}))
+        audit = list(db.county_audit_findings.find({}, {"_id": 0}))
+        department = list(db.department_absorption.find({}, {"_id": 0}))
 
-    finance = list(db.county_finances.find({}, {"_id": 0}))
-    audit = list(db.county_audit_findings.find({}, {"_id": 0}))
-    department = list(db.department_absorption.find({}, {"_id": 0}))
-
-    score = calculate_score(finance, audit, department)
-
-    return jsonify({
-        "score": score,
-        "generated_at": datetime.now().isoformat()
-    })
+        score = calculate_score(finance, audit, department)
+        return jsonify({
+            "score": score,
+            "generated_at": datetime.now().isoformat()
+        }), 200
+    except Exception as e:
+        return jsonify({"error": "Failed to calculate score", "details": str(e)}), 500
