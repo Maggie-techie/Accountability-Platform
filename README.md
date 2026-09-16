@@ -59,20 +59,6 @@ Accountability-Platform/
 └── .gitignore
 ```
 
-## Frontend
-
-The frontend consists of 9 pages that integrate with the AI engine endpoints:
-
-1. **Dashboard (`/`)** - Overview of county health, findings summary, and allocation trends
-2. **MPs Page (`/mps.html`)** - List of constituencies with AI risk analysis
-3. **Constituency Detail Page (`/constituency.html`)** - Detailed analysis for a specific constituency
-4. **Findings Page (`/findings.html`)** - Audit findings with AI classification and severity analysis
-5. **Allocations Page (`/allocations.html`)** - Fund allocation tracking with AI efficiency analysis
-6. **Governor Page (`/governor.html`)** - Governor's office overview with fiscal health and OSR analysis
-7. **Governor Departments Page (`/governor-departments.html`)** - Department performance analysis
-8. **Governor Findings Page (`/governor-findings.html`)** - Governor's office audit findings
-9. **Compare Page (`/compare.html`)** - Cross-leader comparison between MP and Governor tracks
-
 Each page features:
 - AI text panels with narrative explanations
 - Chart.js visualizations consuming data directly from AI JSON responses
