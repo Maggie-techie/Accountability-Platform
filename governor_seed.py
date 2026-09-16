@@ -41,6 +41,7 @@ county_leaders.insert_one({
     "party": "UDA",
     "tenure": "2022-2027",
     "level": "county",
+    "county_code": "019",
     "created_at": datetime.now(UTC)
 })
 
@@ -86,6 +87,7 @@ for row in sheet1.iter_rows(min_row=2, values_only=True):
             "financial_year": year,
             "amount_kshb": float(value),
             "notes": row[7] if len(row) > 7 else "",
+            "county_code": "019",
             "created_at": datetime.now(UTC)
         })
 
@@ -123,6 +125,7 @@ for row in sheet2.iter_rows(min_row=2, values_only=True):
         "finding_type": finding_type,
         "misappropriation_notes": row[4] or "",
         "recommendation": row[5] or "",
+        "county_code": "019",
         "created_at": datetime.now(UTC)
     })
 
@@ -164,6 +167,7 @@ for row in sheet3.iter_rows(values_only=True):
             "status": str(row[6]).strip() if row[6] else "",
             "issues": str(row[7]).strip() if row[7] else "",
 
+            "county_code": "019",
             "created_at": datetime.now(UTC)
         })
 
@@ -172,6 +176,22 @@ for row in sheet3.iter_rows(values_only=True):
 
 department_absorption.insert_many(dept_docs)
 print(f"Inserted {len(dept_docs)} department records")
+
+# ============================
+# CREATE INDEXES
+# ============================
+
+print("\nCreating indexes...")
+db["county_leaders"].create_index([("county_code", ASCENDING)])
+db["county_finances"].create_index([("county_code", ASCENDING)])
+db["county_audit"].create_index([("county_code", ASCENDING)])
+db["department_absorption"].create_index([("county_code", ASCENDING)])
+
+# Create AI cache collection indexes
+db["ai_cache"].create_index([("cache_key", ASCENDING)], unique=True)
+db["ai_cache"].create_index([("expires_at")], expireAfterSeconds=0)
+
+print("  All indexes created")
 
 # ============================
 # DONE

@@ -6,19 +6,23 @@ auth_bp = Blueprint("auth", __name__)
 @auth_bp.route("/", methods=["POST"])
 def login():
     body = request.get_json(silent=True) or {}
-    admin = body.get("admin_name").strip
-    password = body.get("password").strip
+    admin_name = body.get("admin_name", "").strip()
+    password = body.get("password", "").strip()
 
-    if not admin:
-        return jsonify({"error": "admin is required"}), 400
-    
-    if password != 1234:
+    if not admin_name:
+        return jsonify({"error": "admin_name is required"}), 400
+
+    if not password:
+        return jsonify({"error": "password is required"}), 400
+
+    # For demo purposes, using hardcoded password (should be moved to environment variable or database in production)
+    if password != "1234":
         return jsonify({"error": "invalid credentials"}), 401
 
-    token = create_access_token(identity=admin)
+    token = create_access_token(identity=admin_name)
 
     return jsonify({
         "access_token":   token,
-        "admin": "admin",
+        "admin": admin_name,
         "name": "mangereti",
     })
