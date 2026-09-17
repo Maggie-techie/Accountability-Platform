@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { useNavigate, Link } from 'react-router-dom'
 import { Landmark, AlertCircle, CheckCircle2 } from 'lucide-react'
 import { Button } from '../../components/ui'
+import APIService from '../../services/api'
 
 export default function AdminLogin() {
   const navigate = useNavigate()
@@ -9,16 +10,41 @@ export default function AdminLogin() {
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
 
   function handleLogin(e) {
     e.preventDefault()
     setError('')
+    setLoading(true)
+
     if (!email || !password) {
       setError('Enter both your email and password to continue.')
+      setLoading(false)
       return
     }
-    // Demo-only: real app calls POST /auth/login and stores the JWT.
-    navigate('/admin')
+
+    // Call the actual authentication API
+    APIService.login(email, password)
+      .then(response => {
+        if (response.access_token) {
+          // Store the token (in real app, you'd store it securely)
+          localStorage.setItem('authToken', response.access_token)
+          // Also store user info if needed
+          localStorage.setItem('adminName', response.admin || email)
+          localStorage.setItem('userName', response.name || '')
+
+          // Navigate to admin dashboard
+          navigate('/admin')
+        } else {
+          setError('Login failed: No token received')
+          setLoading(false)
+        }
+      })
+      .catch(err => {
+        console.error('Login error:', err)
+        setError('Invalid credentials or server error')
+        setLoading(false)
+      })
   }
 
   return (
@@ -42,7 +68,9 @@ export default function AdminLogin() {
               )}
               <Field label="Email address" type="email" value={email} onChange={setEmail} placeholder="admin@nyeri-accountability.org" />
               <Field label="Password" type="password" value={password} onChange={setPassword} placeholder="••••••••" />
-              <Button type="submit" className="w-full justify-center">Sign in</Button>
+              <Button type="submit" className="w-full justify-center" disabled={loading}>
+                {loading ? 'Signing in...' : 'Sign in'}
+              </Button>
               <button type="button" onClick={() => setMode('forgot')} className="text-sm text-forest-700 hover:underline w-full text-center">
                 Forgot password?
               </button>
