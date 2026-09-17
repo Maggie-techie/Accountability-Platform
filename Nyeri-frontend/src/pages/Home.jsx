@@ -16,7 +16,7 @@ export default function Home() {
       <section className="border-b border-line bg-white">
         <div className="max-w-content mx-auto px-4 sm:px-6 py-16 sm:py-20">
           <div className="max-w-2xl">
-            <Badge tone="info">Nyeri County &middot; Pilot County</Badge>
+            <Badge tone="info">Nyeri County</Badge>
             <h1 className="mt-4 text-4xl sm:text-5xl leading-[1.1] font-semibold text-ink">
               Where does Nyeri's public money actually go?
             </h1>

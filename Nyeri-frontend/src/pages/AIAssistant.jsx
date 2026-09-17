@@ -339,6 +339,7 @@ export default function AIAssistant() {
         </div>
 
         <div className="space-y-4">
+
           <Card className="p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-ink-faint mb-3">Suggested questions</p>
             <div className="flex flex-col gap-2">
@@ -348,7 +349,7 @@ export default function AIAssistant() {
                 </button>
               ))}
             </div>
-          </div>
+          </Card>
           <AIDisclaimer compact />
         </div>
       </div>
