@@ -38,20 +38,20 @@ Accountability-Platform/
 │       ├── governors.py       # Governor data blueprint
 │       └── utils/
 │           └── utils.py       # Database connection utility
-├── frontend/
-│   ├── index.html             # Dashboard/homepage
-│   ├── mps.html               # MPs and constituencies page
-│   ├── constituency.html      # Constituency detail page
-│   ├── findings.html          # Audit findings page
-│   ├── allocations.html       # Fund allocations page
-│   ├── governor.html          # Governor's office page
-│   ├── governor-departments.html  # Governor departments page
-│   ├── governor-findings.html     # Governor findings page
-│   ├── compare.html           # Cross-leader comparison page
-│   ├── css/
-│   │   └── style.css          # Main stylesheet
-│   └── js/
-│       └── main.js            # Main JavaScript with AI service and chart rendering
+├── Nyeri-frontend/            # React + Vite frontend
+│   ├── src/
+│   │   ├── components/        # Reusable UI pieces (buttons, cards, tables, charts, etc.)
+│   │   ├── layouts/           # PublicLayout (navbar+footer) and AdminLayout (sidebar)
+│   │   ├── pages/             # One file per public screen
+│   │   ├── pages/admin/       # One file per admin screen
+│   │   ├── data/              # mockData.js - stands in for the Flask API responses
+│   │   ├── App.jsx            # All routes
+│   │   └── main.jsx           # Entry point
+│   ├── index.html             # HTML entry point
+│   ├── package.json
+│   ├── tailwind.config.js
+│   ├── vite.config.js
+│   └── README.md              # Frontend-specific README
 ├── extract_and_seed.py        # NG-CDF data seeding script
 ├── governor_seed.py           # Governor data seeding script
 ├── requirements.txt           # Python dependencies
@@ -59,6 +59,22 @@ Accountability-Platform/
 ├── README.md                  # This file
 └── .gitignore
 ```
+
+## Frontend Overview
+
+The frontend is a React application built with Vite and Tailwind CSS, located in the `Nyeri-frontend/` directory. It implements all 19 screens from the design brief with mock data, ready to be wired up to the real Flask API.
+
+To develop the frontend:
+
+1. Ensure you have Node.js 18+ installed.
+2. Navigate to the `Nyeri-frontend/` directory.
+3. Run `npm install` to install dependencies.
+4. Run `npm run dev` to start the development server (usually at http://localhost:5173).
+5. The public site is available at http://localhost:5173/ and the admin panel at http://localhost:5173/admin/login (demo login).
+
+To connect to the real backend:
+- Add a `.env` file in `Nyeri-frontend/` with `VITE_API_URL=http://localhost:5000`.
+- Replace the imports from `src/data/mockData.js` in each page with `fetch()` calls to your Flask endpoints.
 
 Each page features:
 - AI text panels with narrative explanations
