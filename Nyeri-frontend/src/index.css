@@ -7,7 +7,7 @@ html {
 }
 
 body {
-  @apply bg-paper text-ink font-sans antialiased;
+  @apply bg-surface text-ink font-sans antialiased;
 }
 
 h1, h2, h3, h4 {
