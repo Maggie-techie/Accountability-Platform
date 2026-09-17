@@ -1,18 +1,11 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Card, Badge, Button } from '../components/ui'
 import { SearchBar, Select, FilterBar } from '../components/Filters'
 import { Breadcrumbs, Pagination, usePagination } from '../components/DataDisplay'
 import { EmptyState } from '../components/ui'
-import { governor, constituencies, scoreCategory } from '../data/mockData'
-
-const allLeaders = [
-  { id: governor.id, name: governor.name, position: 'Governor', party: governor.party, place: 'Nyeri County', score: governor.accountabilityScore, summary: governor.summary },
-  ...constituencies.map((c) => ({
-    id: c.slug, name: c.mp, position: 'Member of Parliament', party: c.party, place: c.name,
-    score: c.accountabilityScore, summary: `Oversees NG-CDF allocation of KSh ${c.totalAllocationKshm.toFixed(1)}M for ${c.name}.`,
-  })),
-]
+import { scoreCategory } from '../data/mockData'
+import APIService from '../services/api'
 
 export default function Leaders() {
   const [params] = useSearchParams()
@@ -20,13 +13,101 @@ export default function Leaders() {
   const [position, setPosition] = useState('')
   const [place, setPlace] = useState('')
 
+  // State for data fetching
+  const [governorData, setGovernorData] = useState(null)
+  const [constituenciesData, setConstituenciesData] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true)
+        // Fetch governor data and constituencies data in parallel
+        const [governorResponse, constituenciesResponse] = await Promise.all([
+          APIService.getGovernorProfile(),
+          APIService.getAllConstituencies()
+        ])
+
+        setGovernorData(governorResponse)
+        setConstituenciesData(constituenciesResponse.constituencies || constituenciesResponse)
+        setError(null)
+      } catch (err) {
+        setError(err.message || 'Failed to load leaders data')
+        setGovernorData(null)
+        setConstituenciesData([])
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchData()
+  }, [])
+
+  // Handle case where data is still loading or there was an error
+  if (loading) {
+    return (
+      <div className="max-w-content mx-auto px-4 sm:px-6 py-8">
+        <Breadcrumbs items={[{ label: 'Leaders' }]} />
+        <h1 className="text-3xl font-semibold mb-2">Leaders directory</h1>
+        <p className="text-ink-muted mb-6 max-w-2xl">Loading leaders...</p>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="max-w-content mx-auto px-4 sm:px-6 py-8">
+        <Breadcrumbs items={[{ label: 'Leaders' }]} />
+        <h1 className="text-3xl font-semibold mb-2">Leaders directory</h1>
+        <p className="text-ink-danger mb-6">{error}</p>
+        <button onClick={() => window.location.reload()} className="btn btn-outline">
+          Try again
+        </button>
+      </div>
+    )
+  }
+
+  // Create allLeaders array from fetched data (similar to original logic)
+  const allLeaders = useMemo(() => {
+    const leaders = []
+
+    // Add governor if data exists
+    if (governorData) {
+      leaders.push({
+        id: governorData.id,
+        name: governorData.name,
+        position: 'Governor',
+        party: governorData.party,
+        place: governorData.county,
+        score: governorData.accountabilityScore,
+        summary: governorData.summary
+      })
+    }
+
+    // Add MPs from constituencies data
+    constituenciesData.forEach((c) => {
+      leaders.push({
+        id: c.slug,
+        name: c.mp,
+        position: 'Member of Parliament',
+        party: c.party,
+        place: c.name,
+        score: c.accountabilityScore,
+        summary: `Oversees NG-CDF allocation of KSh ${c.totalAllocationKshm.toFixed(1)}M for ${c.name}.`,
+      })
+    })
+
+    return leaders
+  }, [governorData, constituenciesData])
+
   const filtered = useMemo(() => {
     return allLeaders.filter((l) =>
       (!q || l.name.toLowerCase().includes(q.toLowerCase()) || l.place.toLowerCase().includes(q.toLowerCase())) &&
       (!position || l.position === position) &&
       (!place || l.place === place)
     )
-  }, [q, position, place])
+  }, [q, position, place, allLeaders])
 
   const { page, setPage, totalPages, pageItems } = usePagination(filtered, 9)
 
@@ -40,7 +121,7 @@ export default function Leaders() {
 
       <FilterBar>
         <Select label="Position" value={position} onChange={setPosition} options={['Governor', 'Member of Parliament']} />
-        <Select label="Constituency / County" value={place} onChange={setPlace} options={['Nyeri County', ...constituencies.map((c) => c.name)]} />
+        <Select label="Constituency / County" value={place} onChange={setPlace} options={['Nyeri County', ...constituenciesData.map((c) => c.name)]} />
       </FilterBar>
 
       {filtered.length === 0 ? (

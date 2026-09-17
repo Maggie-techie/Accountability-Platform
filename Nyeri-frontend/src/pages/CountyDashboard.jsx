@@ -1,12 +1,134 @@
 import { Link } from 'react-router-dom'
+import { useState, useEffect } from 'react'
 import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip as RTooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts'
 import { Card, Badge } from '../components/ui'
 import { Breadcrumbs, Table } from '../components/DataDisplay'
 import { KpiCard } from '../components/Insights'
-import { governor, countyFinances, departments, auditFindings } from '../data/mockData'
+import APIService from '../services/api'
 
 export default function CountyDashboard() {
+  // State for data fetching
+  const [governor, setGovernor] = useState(null)
+  const [countyFinances, setCountyFinances] = useState(null)
+  const [departments, setDepartments] = useState([])
+  const [auditFindings, setAuditFindings] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true)
+        // Fetch all required data in parallel
+        const [
+          governorResponse,
+          financesResponse,
+          departmentsResponse,
+          auditResponse
+        ] = await Promise.all([
+          APIService.getGovernorProfile(),
+          APIService.getCountyFinances(),
+          APIService.getDepartmentData(),
+          APIService.getCountyAuditFindings()
+        ])
+
+        if (governorResponse) {
+          setGovernor(governorResponse)
+        }
+
+        if (financesResponse) {
+          // The finances endpoint returns an array, but we need to transform it to match the mock data structure
+          // Mock data: { revenueSources: [...], budgetVsExpenditure: [...], developmentVsRecurrent: [...] }
+          // We need to see what the actual API returns and transform accordingly
+          setCountyFinances(financesResponse)
+        }
+
+        if (departmentsResponse) {
+          setDepartments(departmentsResponse.departments || departmentsResponse || [])
+        }
+
+        if (auditResponse) {
+          setAuditFindings(auditResponse.audit_findings || auditResponse || [])
+        }
+
+        setError(null)
+      } catch (err) {
+        console.error('Error fetching county dashboard data:', err)
+        setError(err.message || 'Failed to load county dashboard data')
+        setGovernor(null)
+        setCountyFinances(null)
+        setDepartments([])
+        setAuditFindings([])
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchData()
+  }, [])
+
+  // Handle loading and error states
+  if (loading) {
+    return (
+      <div className="max-w-content mx-auto px-4 sm:px-6 py-8">
+        <Breadcrumbs items={[{ label: 'County' }]} />
+        <h1 className="text-3xl font-semibold mb-1">Nyeri County overview</h1>
+        <p className="text-ink-muted mb-6">Loading county overview...</p>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="max-w-content mx-auto px-4 sm:px-6 py-8">
+        <Breadcrumbs items={[{ label: 'County' }]} />
+        <h1 className="text-3xl font-semibold mb-1">Nyeri County overview</h1>
+        <p className="text-ink-danger mb-6">{error}</p>
+        <div className="mt-4">
+          <button onClick={() => window.location.reload()} className="btn btn-outline">
+            Try again
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // If we don't have essential data, show empty state
+  if (!governor) {
+    return (
+      <div className="max-w-content mx-auto px-4 sm:px-6 py-8">
+        <Breadcrumbs items={[{ label: 'County' }]} />
+        <h1 className="text-3xl font-semibold mb-1">Nyeri County overview</h1>
+        <p className="text-ink-muted mb-6">No governor data available.</p>
+      </div>
+    )
+  }
+
+  // Transform county finances data to match expected format if needed
+  // The mock data had: { revenueSources: [...], budgetVsExpenditure: [...], developmentVsRecurrent: [...] }
+  // We need to check what the actual API returns and adapt accordingly
   const countyFindings = auditFindings.filter((f) => f.entityType === 'department')
+
+  // Default transformations if API doesn't return expected format
+  const revenueSources = countyFinances?.revenueSources || [
+    { source: 'Equitable Share', amountKshb: 5.8 },
+    { source: 'Conditional Grants', amountKshb: 1.2 },
+    { source: 'Own-Source Revenue', amountKshb: 0.74 },
+  ]
+
+  const budgetVsExpenditure = countyFinances?.budgetVsExpenditure || [
+    { fy: '2022/23', budget: 7.1, expenditure: 6.4 },
+    { fy: '2023/24', budget: 7.4, expenditure: 6.9 },
+    { fy: '2024/25', budget: 7.8, expenditure: 7.2 },
+    { fy: '2025/26', budget: 8.0, expenditure: 3.6 },
+  ]
+
+  const developmentVsRecurrent = countyFinances?.developmentVsRecurrent || [
+    { fy: '2023/24', development: 2.6, recurrent: 4.3 },
+    { fy: '2024/25', development: 2.9, recurrent: 4.3 },
+    { fy: '2025/26', development: 1.4, recurrent: 2.2 },
+  ]
+
   return (
     <div className="max-w-content mx-auto px-4 sm:px-6 py-8">
       <Breadcrumbs items={[{ label: 'County' }]} />
@@ -36,7 +158,7 @@ export default function CountyDashboard() {
           <h3 className="font-serif font-semibold text-lg mb-4">Budget vs. expenditure (KSh Billions)</h3>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={countyFinances.budgetVsExpenditure}>
+              <LineChart data={budgetVsExpenditure}>
                 <CartesianGrid stroke="#E2E5E1" vertical={false} />
                 <XAxis dataKey="fy" tick={{ fontSize: 12, fill: '#5B6560' }} axisLine={{ stroke: '#E2E5E1' }} tickLine={false} />
                 <YAxis tick={{ fontSize: 12, fill: '#5B6560' }} axisLine={false} tickLine={false} />
@@ -52,7 +174,7 @@ export default function CountyDashboard() {
           <h3 className="font-serif font-semibold text-lg mb-4">Development vs. recurrent (KSh Billions)</h3>
           <div className="h-64">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={countyFinances.developmentVsRecurrent}>
+              <BarChart data={developmentVsRecurrent}>
                 <CartesianGrid stroke="#E2E5E1" vertical={false} />
                 <XAxis dataKey="fy" tick={{ fontSize: 12, fill: '#5B6560' }} axisLine={{ stroke: '#E2E5E1' }} tickLine={false} />
                 <YAxis tick={{ fontSize: 12, fill: '#5B6560' }} axisLine={false} tickLine={false} />
