@@ -24,6 +24,7 @@ The Accountability Platform provides RESTful APIs to access:
 - Responsive frontend dashboard with Chart.js visualizations
 - AI-powered text panels and charts integrated on all pages
 - Mobile-friendly design
+- Enhanced frontend UI with bolder colors, crystal white background, and improved card styling
 
 ## Project Structure
 
