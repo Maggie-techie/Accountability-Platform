@@ -33,9 +33,9 @@ export default function Anomalies() {
             // Handle different possible response formats
             if (Array.isArray(data)) {
               anomaliesResponse = data
-            } else if data.anomalies) {
+            } else if (data.anomalies) {
               anomaliesResponse = data.anomalies
-            } else if data.data) {
+            } else if (data.data) {
               anomaliesResponse = Array.isArray(data.data) ? data.data : []
             }
           } else {
