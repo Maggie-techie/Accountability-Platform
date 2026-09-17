@@ -232,7 +232,9 @@ export default function AdminDataManagement({ entity }) {
       </div>
       <p className="text-ink-muted mb-6">Search, review and manage {config.title.toLowerCase()} records.</p>
 
-      <div className="mb-4 max-w-sm"><SearchBar value={q} onChange={setQ} placeholder={`Search ${config.title.toLowerCase()}`} /></div>
+      <div className="mb-4 max-w-sm">
+        <SearchBar value={q} onChange={setQ} placeholder={`Search ${config.title.toLowerCase()}`} />
+      </div>
 
       <Card className="p-2">
         <Table
@@ -252,7 +254,7 @@ export default function AdminDataManagement({ entity }) {
             </>
           )}
         />
-      </div>
+        </Card> 
       <Pagination page={page} totalPages={totalPages} onChange={setPage} />
     </div>
   )
