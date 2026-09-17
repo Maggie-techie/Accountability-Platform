@@ -24,7 +24,7 @@ The Accountability Platform provides RESTful APIs to access:
 - Responsive frontend dashboard with Chart.js visualizations
 - AI-powered text panels and charts integrated on all pages
 - Mobile-friendly design
-- Enhanced frontend UI with bolder colors, crystal white background, and improved card styling
+- Enhanced frontend UI with bolder colors, crystal white background, improved card styling, and pitch dark header and footer
 
 ## Project Structure
 
@@ -125,7 +125,7 @@ python extract_and_seed.py
 python backend/app.py
 ```
 
-6. Access the frontend at `http://localhost:5000`
+6. Access the frontend at `http://localhost:5173` (when running `npm run dev` in the `Nyeri-frontend/` directory). The backend API is available at `http://localhost:5000`.
 
 ## API Endpoints
 
@@ -204,10 +204,7 @@ python test_syntax.py
 
 ### Frontend Development
 
-The frontend uses plain HTML, CSS, and JavaScript with Chart.js for visualizations. To modify:
-- Edit HTML files in the `frontend/` directory
-- Modify styles in `frontend/css/style.css`
-- Update logic in `frontend/js/main.js`
+The frontend is located in the `Nyeri-frontend/` directory. For development instructions, see the [Frontend Overview](#frontend-overview) section above.
 
 ## Deployment
 

@@ -12,6 +12,7 @@ The frontend UI has been enhanced with:
 - Improved card styling with more visible borders and deeper shadows
 - Enhanced text colors for better readability (pure black text)
 - Refined forest greens, clay reds/browns, and gold accents
+- Pitch dark header and footer backgrounds for all pages
 
 ## Requirements
 
