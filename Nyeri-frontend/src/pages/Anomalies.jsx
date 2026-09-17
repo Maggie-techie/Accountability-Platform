@@ -91,6 +91,14 @@ export default function Anomalies() {
     fetchData()
   }, [])
 
+  // All hooks must run unconditionally, on every render, before any early return.
+  const filtered = useMemo(() => anomalies.filter((a) =>
+    (!severity || a.severity === severity) &&
+    (!fy || a.financialYear === fy) &&
+    (!category || a.category === category) &&
+    (!status || a.status === status)
+  ), [anomalies, severity, fy, category, status])
+
   // Handle loading and error states
   if (loading) {
     return (
@@ -116,13 +124,6 @@ export default function Anomalies() {
       </div>
     )
   }
-
-  const filtered = useMemo(() => anomalies.filter((a) =>
-    (!severity || a.severity === severity) &&
-    (!fy || a.financialYear === fy) &&
-    (!category || a.category === category) &&
-    (!status || a.status === status)
-  ), [anomalies, severity, fy, category, status])
 
   const counts = {
     High: filtered.filter((a) => a.severity === 'High').length,
