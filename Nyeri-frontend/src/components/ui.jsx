@@ -39,7 +39,7 @@ export function SeverityBadge({ severity }) {
 
 export function Card({ className = '', children, as: As = 'div', ...props }) {
   return (
-    <As className={`bg-surface border border-line rounded-md shadow-card ${className}`} {...props}>
+    <As className={`bg-surface border border-ink/20 rounded-md shadow-lg ${className}`} {...props}>
       {children}
     </As>
   )

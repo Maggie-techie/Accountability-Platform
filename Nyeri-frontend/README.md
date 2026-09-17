@@ -4,6 +4,17 @@ React + Vite frontend for the AI-Powered Nyeri Governance Accountability Platfor
 All 19 screens from the design brief are implemented with mock data, ready to be
 wired up to the real Flask API.
 
+## Styling Updates
+
+The frontend UI has been enhanced with:
+- Crystal white background (#FFFFFF) replacing the previous off-white
+- Bolder, more vibrant color palette with increased contrast
+- Improved card styling with more visible borders and deeper shadows
+- Enhanced text colors for better readability (pure black text)
+- Refined forest greens, clay reds/browns, and gold accents
+- Pitch dark header and footer backgrounds for all pages
+- Changed font to Inter with improved letter spacing and line height for better readability
+
 ## Requirements
 
 - Node.js 18+ (check with `node -v`)

@@ -1,7 +1,7 @@
 import { NavLink, Outlet, Link, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Users, MapPin, Wallet, ClipboardList, FileWarning,
-  Building2, UploadCloud, ShieldCheck, DatabaseZap, BrainCircuit, Settings, LogOut, Landmark,
+  Building2, UploadCloud, ShieldCheck, BrainCircuit, Settings, LogOut, Landmark,
 } from 'lucide-react'
 
 const navItems = [
@@ -58,13 +58,13 @@ export default function AdminLayout() {
       </aside>
 
       <div className="flex-1 flex flex-col min-w-0">
-        <header className="h-16 border-b border-line bg-white flex items-center justify-between px-4 sm:px-6">
-          <Link to="/" className="text-sm text-ink-muted hover:text-ink">&larr; Back to public site</Link>
+        <header className="h-16 border-b border-line/50 bg-ink flex items-center justify-between px-4 sm:px-6">
+          <Link to="/" className="text-sm text-white/60 hover:text-white">&larr; Back to public site</Link>
           <div className="flex items-center gap-3">
             <div className="h-8 w-8 rounded-full bg-forest-100 flex items-center justify-center text-forest-700 text-xs font-semibold">
               AD
             </div>
-            <span className="text-sm text-ink hidden sm:block">Admin User</span>
+            <span className="text-sm text-white/60 hidden sm:block">Admin User</span>
           </div>
         </header>
         <main className="flex-1 p-4 sm:p-6 max-w-[1400px] w-full mx-auto">
