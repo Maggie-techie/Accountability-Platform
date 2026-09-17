@@ -13,6 +13,7 @@ The frontend UI has been enhanced with:
 - Enhanced text colors for better readability (pure black text)
 - Refined forest greens, clay reds/browns, and gold accents
 - Pitch dark header and footer backgrounds for all pages
+- Changed font to Inter with improved letter spacing and line height for better readability
 
 ## Requirements
 
