@@ -4,6 +4,8 @@ from pymongo import MongoClient
 from datetime import datetime
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
+from dotenv import load_dotenv
+load_dotenv()
 
 
 # api blueprints
@@ -20,9 +22,11 @@ def create_app() -> Flask:
     CORS(app)
 
     #  Configurations for jwt token manager, mongo database, locally installed ollama and qwen ai model
+    # Configurations for JWT token manager, MongoDB database,
+# locally installed Ollama and Qwen AI model
     app.config["JWT_SECRET_KEY"]          = os.getenv("JWT_SECRET_KEY", "dev-secret-change-in-prod")
-    app.config["JWT_ACCESS_TOKEN_EXPIRES"] = False   # long-lived for demo; tighten in prod
-    app.config["MONGODB_URI"]             = os.getenv("MONGODB_URI", "mongodb://localhost:27017/Accountability")
+    app.config["JWT_ACCESS_TOKEN_EXPIRES"] = False
+    app.config["MONGODB_URI"]             = os.getenv("MONGODB_URI")
     app.config["OLLAMA_HOST"]             = os.getenv("OLLAMA_HOST", "http://localhost:11434")
     app.config["OLLAMA_MODEL"]            = os.getenv("OLLAMA_MODEL", "qwen")
 
