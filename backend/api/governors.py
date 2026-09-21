@@ -10,6 +10,14 @@ def serializable_doc(data):
     for doc in data:
         doc["_id"] = str(doc["_id"])
     return data
+
+def serializable_single(doc):
+    """For a single document (find_one())"""
+    if doc and "_id" in doc:
+        doc["_id"] = str(doc["_id"])
+    return doc
+
+
 # GOVERNOR PROFILE
 
 @governor_bp.route("/", methods=["GET"])
@@ -17,12 +25,13 @@ def get_governor():
     try:
         db = get_db()
         profile = db.county_leaders.find_one({})
-
-        full_profile = serializable_doc(profile)
-
         if not profile:
-            return jsonify({"error": "Governor profile not found"}), 404
+                    return jsonify({"error": "Governor profile not found"}), 404
+        
+        full_profile = serializable_single(profile)
+
         return jsonify(full_profile), 200
+    
     except Exception as e:
         return jsonify({"error": "Failed to retrieve governor profile", "details": str(e)}), 500
 

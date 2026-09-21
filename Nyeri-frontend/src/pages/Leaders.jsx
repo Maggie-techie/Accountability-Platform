@@ -43,31 +43,7 @@ export default function Leaders() {
 
     fetchData()
   }, [])
-
-  // Handle case where data is still loading or there was an error
-  if (loading) {
-    return (
-      <div className="max-w-content mx-auto px-4 sm:px-6 py-8">
-        <Breadcrumbs items={[{ label: 'Leaders' }]} />
-        <h1 className="text-3xl font-semibold mb-2">Leaders directory</h1>
-        <p className="text-ink-muted mb-6 max-w-2xl">Loading leaders...</p>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="max-w-content mx-auto px-4 sm:px-6 py-8">
-        <Breadcrumbs items={[{ label: 'Leaders' }]} />
-        <h1 className="text-3xl font-semibold mb-2">Leaders directory</h1>
-        <p className="text-ink-danger mb-6">{error}</p>
-        <button onClick={() => window.location.reload()} className="btn btn-outline">
-          Try again
-        </button>
-      </div>
-    )
-  }
-
+  
   // Create allLeaders array from fetched data (similar to original logic)
   const allLeaders = useMemo(() => {
     const leaders = []
@@ -100,7 +76,7 @@ export default function Leaders() {
 
     return leaders
   }, [governorData, constituenciesData])
-
+  
   const filtered = useMemo(() => {
     return allLeaders.filter((l) =>
       (!q || l.name.toLowerCase().includes(q.toLowerCase()) || l.place.toLowerCase().includes(q.toLowerCase())) &&
@@ -110,6 +86,30 @@ export default function Leaders() {
   }, [q, position, place, allLeaders])
 
   const { page, setPage, totalPages, pageItems } = usePagination(filtered, 9)
+
+  // Handle case where data is still loading or there was an error
+  if (loading) {
+    return (
+      <div className="max-w-content mx-auto px-4 sm:px-6 py-8">
+        <Breadcrumbs items={[{ label: 'Leaders' }]} />
+        <h1 className="text-3xl font-semibold mb-2">Leaders directory</h1>
+        <p className="text-ink-muted mb-6 max-w-2xl">Loading leaders...</p>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="max-w-content mx-auto px-4 sm:px-6 py-8">
+        <Breadcrumbs items={[{ label: 'Leaders' }]} />
+        <h1 className="text-3xl font-semibold mb-2">Leaders directory</h1>
+        <p className="text-ink-danger mb-6">{error}</p>
+        <button onClick={() => window.location.reload()} className="btn btn-outline">
+          Try again
+        </button>
+      </div>
+    )
+  }
 
   return (
     <div className="max-w-content mx-auto px-4 sm:px-6 py-8">
