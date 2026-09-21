@@ -477,6 +477,8 @@ def mp_peer_rank(constituency_slug):
                 "cached": True,
                 "data": cached_response
             })
+        
+        db = get_db()
 
         # Extract data
         data = validate_and_extract_data(constituency_slug)
@@ -731,32 +733,7 @@ def governor_fiscal_health():
         data = validate_and_extract_data()  # No constituency slug for governor-wide analysis
         if "error" in data:
             return jsonify({"error": data["error"]}), 404
-
-        # Prepare prompt for Claude
-        prompt = """
-        Analyze the fiscal health of the county government based on financial data, audit findings, and department performance.
-        Assess overall financial stability, sustainability, and performance.
-
-        Governor Data: {json.dumps(data.get('governor', {}), default=str)}
-
-        Return ONLY a JSON object with exactly this structure:
-        {{
-          "narrative_fields": {{
-            "health_level": "string (e.g., Strong, Moderate, Weak)",
-            "budget_summary": "string (summary of budget performance)",
-            "osr_analysis": "string (Own Source Revenue analysis)"
-          }},
-          "chart_data": {{
-            "health_score": number (0-100 for gauge visualization),
-            "revenue_trend": [{{"fy": "string", "equitable": number, "conditional": number, "osr": number, "health": number}}],
-            "osr_trend": [{{"fy": "string", "target": number, "actual": number}}]
-          }}
-        }}
-        """.format(
-            json.dumps==data.get('governor', {}),
-            default=str
-        )
-
+        
         # Fix the prompt formatting
         prompt = """
         Analyze the fiscal health of the county government based on financial data, audit findings, and department performance.

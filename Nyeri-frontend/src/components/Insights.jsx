@@ -22,7 +22,8 @@ export function KpiCard({ label, value, change, changeTone = 'neutral', sub }) {
 }
 
 export function ScoreGauge({ score, size = 128 }) {
-  const { label, tone } = scoreCategory(score)
+  const safeScore = Number.isFinite(score) ? score : 0
+  const { label, tone } = scoreCategory(safeScore)
   const toneColor = { good: '#14532D', watch: '#A87620', risk: '#A6431F' }[tone]
   const circumference = 2 * Math.PI * 52
   const offset = circumference - (score / 100) * circumference
@@ -36,7 +37,9 @@ export function ScoreGauge({ score, size = 128 }) {
         />
       </svg>
       <div className="-mt-[76px] flex flex-col items-center">
-        <span className="text-3xl font-serif font-semibold text-ink">{score}</span>
+        <span className="text-3xl font-serif font-semibold text-ink">
+          {Number.isFinite(score) ? score : '—'}
+        </span>
         <span className="text-xs text-ink-muted">out of 100</span>
       </div>
       <Badge tone={tone} className="mt-3">{label}</Badge>
