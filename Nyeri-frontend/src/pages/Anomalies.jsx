@@ -6,6 +6,32 @@ import { Select, FilterBar } from '../components/Filters'
 import { Breadcrumbs, Table } from '../components/DataDisplay'
 import APIService from '../services/api'
 
+const API_BASE_URL = 'http://localhost:5000/api'
+
+// Turns raw anomaly points from one constituency's AI module response into
+// discrete table/card rows. chart_data.anomaly_points is documented as:
+// [{ fy: string, metric: string, value: number, expected: number }]
+function pointsToRows(constituency, aiData) {
+  const points = aiData?.chart_data?.anomaly_points || []
+  const summary = aiData?.narrative_fields?.summary || aiData?.narrative_fields?.details || ''
+
+  return points.map((point, i) => {
+    const deviation = point.expected ? Math.abs(point.value - point.expected) / point.expected : 0
+    const severity = deviation > 0.5 ? 'High' : deviation > 0.2 ? 'Medium' : 'Low'
+
+    return {
+      id: `${constituency.slug}-${point.fy || 'unknown'}-${i}`,
+      title: point.metric || 'Flagged deviation',
+      entity: constituency.name,
+      category: point.metric || 'Uncategorized',
+      financialYear: point.fy || 'Unknown',
+      severity,
+      status: 'Flagged',
+      summary,
+    }
+  })
+}
+
 export default function Anomalies() {
   const [severity, setSeverity] = useState('')
   const [fy, setFy] = useState('')
@@ -22,62 +48,26 @@ export default function Anomalies() {
     const fetchData = async () => {
       try {
         setLoading(true)
-        // Try to fetch anomalies from a general endpoint first
-        let anomaliesResponse = []
-        let fallbackUsed = false
 
-        try {
-          const res = await fetch(`${APIService.__API_BASE_URL || 'http://localhost:5000/api'}/anomalies`)
-          if (res.ok) {
-            const data = await res.json()
-            // Handle different possible response formats
-            if (Array.isArray(data)) {
-              anomaliesResponse = data
-            } else if (data.anomalies) {
-              anomaliesResponse = data.anomalies
-            } else if (data.data) {
-              anomaliesResponse = Array.isArray(data.data) ? data.data : []
+        const constituenciesRes = await APIService.getAllConstituencies()
+        const constituencies = constituenciesRes.constituencies || constituenciesRes || []
+
+        const results = await Promise.all(
+          constituencies.map(async (c) => {
+            try {
+              const res = await fetch(`${API_BASE_URL}/ai/mp/${c.slug}/anomalies`)
+              if (!res.ok) return []
+              const json = await res.json()
+              if (!json?.success || !json.data) return []
+              return pointsToRows(c, json.data)
+            } catch (err) {
+              console.warn(`Could not fetch anomalies for ${c.slug}:`, err)
+              return []
             }
-          } else {
-            throw new Error(`HTTP ${res.status}`)
-          }
-        } catch (err) {
-          console.warn('Could not fetch anomalies from general endpoint, trying fallback:', err)
-          fallbackUsed = true
-        }
+          })
+        )
 
-        // Fallback: if no general endpoint, fetch all constituencies and get their anomalies
-        // Note: This is inefficient for large datasets but works for demo/small data
-        if (fallbackUsed || anomaliesResponse.length === 0) {
-          try {
-            const constituenciesRes = await APIService.getAllConstituencies()
-            const constituencies = constituenciesRes.constituencies || constituenciesRes || []
-
-            // Get anomalies for each constituency (limit to prevent too many requests)
-            const anomaliesPromises = constituencies
-              .slice(0, 10) // Limit to first 10 constituencies to avoid too many requests
-              .map(constituency =>
-                fetch(`${APIService.__API_BASE_URL || 'http://localhost:5000/api'}/ai/mp/${constituency.slug}/anomalies`)
-                  .then(res => res.ok ? res.json() : { success: false, data: [] })
-                  .catch(() => ({ success: false, data: [] }))
-              )
-
-            const anomaliesResults = await Promise.all(anomaliesPromises)
-
-            // Flatten and format the anomalies
-            anomaliesResponse = anomaliesResults
-              .filter(result => result.success)
-              .flatMap(result =>
-                Array.isArray(result.data) ? result.data :
-                result.data.anomalies ? result.data.anomalies : []
-              )
-          } catch (fallbackErr) {
-            console.error('Error in fallback anomalies fetch:', fallbackErr)
-            anomaliesResponse = []
-          }
-        }
-
-        setAnomalies(anomaliesResponse)
+        setAnomalies(results.flat())
         setError(null)
       } catch (err) {
         console.error('Error fetching anomalies data:', err)
@@ -164,6 +154,7 @@ export default function Anomalies() {
             <Table
               columns={['Anomaly', 'Entity', 'Category', 'FY', 'Severity', 'Status']}
               rows={filtered}
+              keyField="id"
               renderRow={(a) => (
                 <>
                   <td className="py-3 pr-4 pl-2"><Link to={`/anomalies/${a.id}`} className="font-medium text-ink hover:text-forest-700">{a.title}</Link></td>
