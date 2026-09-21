@@ -51,7 +51,7 @@ export default function Leaders() {
     // Add governor if data exists
     if (governorData) {
       leaders.push({
-        id: governorData.id,
+        id: governorData._id || governorData.id,
         name: governorData.name,
         position: 'Governor',
         party: governorData.party,
@@ -63,14 +63,17 @@ export default function Leaders() {
 
     // Add MPs from constituencies data
     constituenciesData.forEach((c) => {
+      const allocation = c.allocations_ksm || {}
+      const totalAllocation = Object.values(allocation).reduce((sum, val) => sum + (val || 0), 0)
+
       leaders.push({
         id: c.slug,
-        name: c.mp,
+        name: c.mp?.name,
         position: 'Member of Parliament',
-        party: c.party,
+        party: c.mp?.party,
         place: c.name,
         score: c.accountabilityScore,
-        summary: `Oversees NG-CDF allocation of KSh ${c.totalAllocationKshm.toFixed(1)}M for ${c.name}.`,
+        summary: `Oversees NG-CDF allocation of KSh ${totalAllocation.toFixed(1)}M for ${c.name}.`,
       })
     })
 
