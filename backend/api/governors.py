@@ -1,14 +1,13 @@
 from flask import Blueprint, jsonify, request
-from api.utils.utils import get_db
+from api.database.connection import get_db
 from datetime import datetime
 
 governor_bp = Blueprint("governor", __name__)
 
 
-# =========================
 # GOVERNOR PROFILE
-# =========================
-@governor_bp.route("/governor", methods=["GET"])
+
+@governor_bp.route("/", methods=["GET"])
 def get_governor():
     try:
         db = get_db()
@@ -20,7 +19,7 @@ def get_governor():
         return jsonify({"error": "Failed to retrieve governor profile", "details": str(e)}), 500
 
 # get county finances
-@governor_bp.route("/governor/finances", methods=["GET"])
+@governor_bp.route("/finances", methods=["GET"])
 def get_finances():
     try:
         db = get_db()
@@ -34,7 +33,7 @@ def get_finances():
         return jsonify({"error": "Failed to retrieve finances", "details": str(e)}), 500
 
 # get departments data
-@governor_bp.route("/governor/departments", methods=["GET"])
+@governor_bp.route("/departments", methods=["GET"])
 def get_departments():
     try:
         db = get_db()
@@ -44,7 +43,7 @@ def get_departments():
         return jsonify({"error": "Failed to retrieve departments", "details": str(e)}), 500
 
 # get county audit findings
-@governor_bp.route("/governor/audit", methods=["GET"])
+@governor_bp.route("/audit", methods=["GET"])
 def get_audit():
     try:
         db = get_db()
@@ -73,7 +72,7 @@ def calculate_score(finance, audit, department):
     return round(score, 2)
 
 
-@governor_bp.route("/governor/score", methods=["GET"])
+@governor_bp.route("/score", methods=["GET"])
 def get_score():
     try:
         db = get_db()
