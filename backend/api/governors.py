@@ -5,16 +5,24 @@ from datetime import datetime
 governor_bp = Blueprint("governor", __name__)
 
 
+# creating a function for converting objectid to string
+def serializable_doc(data):
+    for doc in data:
+        doc["_id"] = str(doc["_id"])
+    return data
 # GOVERNOR PROFILE
 
 @governor_bp.route("/", methods=["GET"])
 def get_governor():
     try:
         db = get_db()
-        profile = db.county_leaders.find_one({}, {"_id": 0})
+        profile = db.county_leaders.find_one({})
+
+        full_profile = serializable_doc(profile)
+
         if not profile:
             return jsonify({"error": "Governor profile not found"}), 404
-        return jsonify(profile), 200
+        return jsonify(full_profile), 200
     except Exception as e:
         return jsonify({"error": "Failed to retrieve governor profile", "details": str(e)}), 500
 
@@ -28,9 +36,8 @@ def get_finances():
         if year:
             query["financial_year"] = year
         data = list(db.county_finances.find(query))
-        for doc in data:
-            doc["_id"] = str(doc["_id"])
-        return jsonify(data), 200
+        full_data = serializable_doc(data)
+        return jsonify(full_data), 200
     except Exception as e:
         return jsonify({"error": "Failed to retrieve finances", "details": str(e)}), 500
 
@@ -40,9 +47,8 @@ def get_departments():
     try:
         db = get_db()
         data = list(db.department_absorption.find({}))
-        for doc in data:
-            doc["_id"] = str(doc["_id"])
-        return jsonify(data), 200
+        full_data = serializable_doc(data)
+        return jsonify(full_data), 200
     except Exception as e:
         return jsonify({"error": "Failed to retrieve departments", "details": str(e)}), 500
 
@@ -52,9 +58,8 @@ def get_audit():
     try:
         db = get_db()
         data = list(db.county_audit_findings.find({}))
-        for doc in data:
-            doc["_id"] = str(doc["_id"])
-        return jsonify(data), 200
+        full_data = serializable_doc(data)
+        return jsonify(full_data), 200
     except Exception as e:
         return jsonify({"error": "Failed to retrieve audit findings", "details": str(e)}), 500
 
