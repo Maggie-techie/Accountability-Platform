@@ -193,6 +193,7 @@ export default function CountyDashboard() {
         <Table
           columns={['Department', 'Approved Budget', 'Q3 Spend', 'Absorption', 'Status']}
           rows={departments}
+          keyField="_id"
           renderRow={(d) => (
             <>
               <td className="py-3 pr-4 font-medium text-ink">{d.department}</td>

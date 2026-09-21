@@ -18,7 +18,7 @@ export function Table({ columns, rows, keyField = 'id', renderRow }) {
         </thead>
         <tbody>
           {rows.map((row) => (
-            <tr key={row[keyField]} className="border-b border-line last:border-0 hover:bg-forest-50/40">
+            <tr key= {getRowKey ? getRowKey(row, i) : row[keyField]} className="border-b border-line last:border-0 hover:bg-forest-50/40">
               {renderRow(row)}
             </tr>
           ))}

@@ -75,7 +75,7 @@ export default function AccountabilityDashboard() {
         <Table
           columns={['Constituency', 'MP', 'Score', 'Allocation FY24/25', 'Audit Opinion', 'Findings']}
           rows={constituencies}
-          keyField="slug"
+          keyField="_id"
           renderRow={(c) => (
             <>
               <td className="py-3 pr-4 font-medium text-ink">{c.name}</td>
