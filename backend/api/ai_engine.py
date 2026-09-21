@@ -753,7 +753,7 @@ def governor_fiscal_health():
           }}
         }}
         """.format(
-            json.dumps=data.get('governor', {}),
+            json.dumps==data.get('governor', {}),
             default=str
         )
 

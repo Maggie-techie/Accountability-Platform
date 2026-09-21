@@ -17,6 +17,7 @@ def get_db():
             _mongo_client = MongoClient(uri, serverSelectionTimeoutMS=5000)
             # Verify connection
             _mongo_client.admin.command('ping')
+            print("MongoDB connection established")
             logging.info("MongoDB connection established")
         except Exception as e:
             logging.error(f"Failed to connect to MongoDB: {e}")
