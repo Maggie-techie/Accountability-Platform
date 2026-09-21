@@ -207,7 +207,7 @@ export default function ConstituencyProfile() {
       <Card className="p-6 mb-6 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
           <h1 className="text-2xl font-serif font-semibold text-ink">{constituency.name} Constituency</h1>
-          <p className="text-ink-muted">MP: <Link to={`/leaders/${constituency.slug}`} className="text-forest-700 hover:underline">{constituency.mp}</Link> &middot; {constituency.party}</p>
+          <p className="text-ink-muted">MP: <Link to={`/leaders/${constituency.slug}`} className="text-forest-700 hover:underline">{constituency.mp?.name}</Link> &middot; {constituency.mp?.party}</p>
         </div>
         <div className="flex items-center gap-4">
           <div className="text-center">
