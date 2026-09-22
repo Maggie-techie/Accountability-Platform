@@ -24,6 +24,7 @@ The Accountability Platform provides RESTful APIs to access:
 - Responsive frontend dashboard with Chart.js visualizations
 - AI-powered text panels and charts integrated on all pages
 - Mobile-friendly design
+- Enhanced frontend UI with bolder colors, crystal white background, improved card styling, pitch dark header and footer, and improved font with better spacing
 
 ## Project Structure
 
@@ -37,20 +38,20 @@ Accountability-Platform/
 │       ├── governors.py       # Governor data blueprint
 │       └── utils/
 │           └── utils.py       # Database connection utility
-├── frontend/
-│   ├── index.html             # Dashboard/homepage
-│   ├── mps.html               # MPs and constituencies page
-│   ├── constituency.html      # Constituency detail page
-│   ├── findings.html          # Audit findings page
-│   ├── allocations.html       # Fund allocations page
-│   ├── governor.html          # Governor's office page
-│   ├── governor-departments.html  # Governor departments page
-│   ├── governor-findings.html     # Governor findings page
-│   ├── compare.html           # Cross-leader comparison page
-│   ├── css/
-│   │   └── style.css          # Main stylesheet
-│   └── js/
-│       └── main.js            # Main JavaScript with AI service and chart rendering
+├── Nyeri-frontend/            # React + Vite frontend
+│   ├── src/
+│   │   ├── components/        # Reusable UI pieces (buttons, cards, tables, charts, etc.)
+│   │   ├── layouts/           # PublicLayout (navbar+footer) and AdminLayout (sidebar)
+│   │   ├── pages/             # One file per public screen
+│   │   ├── pages/admin/       # One file per admin screen
+│   │   ├── data/              # mockData.js - stands in for the Flask API responses
+│   │   ├── App.jsx            # All routes
+│   │   └── main.jsx           # Entry point
+│   ├── index.html             # HTML entry point
+│   ├── package.json
+│   ├── tailwind.config.js
+│   ├── vite.config.js
+│   └── README.md              # Frontend-specific README
 ├── extract_and_seed.py        # NG-CDF data seeding script
 ├── governor_seed.py           # Governor data seeding script
 ├── requirements.txt           # Python dependencies
@@ -59,19 +60,21 @@ Accountability-Platform/
 └── .gitignore
 ```
 
-## Frontend
+## Frontend Overview
 
-The frontend consists of 9 pages that integrate with the AI engine endpoints:
+The frontend is a React application built with Vite and Tailwind CSS, located in the `Nyeri-frontend/` directory. It implements all 19 screens from the design brief with mock data, ready to be wired up to the real Flask API.
 
-1. **Dashboard (`/`)** - Overview of county health, findings summary, and allocation trends
-2. **MPs Page (`/mps.html`)** - List of constituencies with AI risk analysis
-3. **Constituency Detail Page (`/constituency.html`)** - Detailed analysis for a specific constituency
-4. **Findings Page (`/findings.html`)** - Audit findings with AI classification and severity analysis
-5. **Allocations Page (`/allocations.html`)** - Fund allocation tracking with AI efficiency analysis
-6. **Governor Page (`/governor.html`)** - Governor's office overview with fiscal health and OSR analysis
-7. **Governor Departments Page (`/governor-departments.html`)** - Department performance analysis
-8. **Governor Findings Page (`/governor-findings.html`)** - Governor's office audit findings
-9. **Compare Page (`/compare.html`)** - Cross-leader comparison between MP and Governor tracks
+To develop the frontend:
+
+1. Ensure you have Node.js 18+ installed.
+2. Navigate to the `Nyeri-frontend/` directory.
+3. Run `npm install` to install dependencies.
+4. Run `npm run dev` to start the development server (usually at http://localhost:5173).
+5. The public site is available at http://localhost:5173/ and the admin panel at http://localhost:5173/admin/login (demo login).
+
+To connect to the real backend:
+- Add a `.env` file in `Nyeri-frontend/` with `VITE_API_URL=http://localhost:5000`.
+- Replace the imports from `src/data/mockData.js` in each page with `fetch()` calls to your Flask endpoints.
 
 Each page features:
 - AI text panels with narrative explanations
@@ -122,7 +125,7 @@ python extract_and_seed.py
 python backend/app.py
 ```
 
-6. Access the frontend at `http://localhost:5000`
+6. Access the frontend at `http://localhost:5173` (when running `npm run dev` in the `Nyeri-frontend/` directory). The backend API is available at `http://localhost:5000`.
 
 ## API Endpoints
 
@@ -201,10 +204,7 @@ python test_syntax.py
 
 ### Frontend Development
 
-The frontend uses plain HTML, CSS, and JavaScript with Chart.js for visualizations. To modify:
-- Edit HTML files in the `frontend/` directory
-- Modify styles in `frontend/css/style.css`
-- Update logic in `frontend/js/main.js`
+The frontend is located in the `Nyeri-frontend/` directory. For development instructions, see the [Frontend Overview](#frontend-overview) section above.
 
 ## Deployment
 

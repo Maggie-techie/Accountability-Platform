@@ -4,3 +4,4 @@ openpyxl
 flask
 flask-cors
 flask_jwt_extended
+dotenv
