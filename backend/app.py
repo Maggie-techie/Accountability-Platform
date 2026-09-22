@@ -39,6 +39,8 @@ def create_app() -> Flask:
     app.register_blueprint(governor_bp,    url_prefix="/api/governor")
     app.register_blueprint(constituency_bp, url_prefix="/api/constituency")
     app.register_blueprint(ai_bp,        url_prefix="/api/ai")
+    app.register_blueprint(admin_bp,     url_prefix="/api/admin")
+
 
     #  Error handlers
     @app.errorhandler(404)

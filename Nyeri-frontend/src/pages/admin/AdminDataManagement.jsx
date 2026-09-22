@@ -74,7 +74,7 @@ export default function AdminDataManagement({ entity }) {
           case 'leaders':
             // For leaders, we need to get both governor and constituencies
             const [governorRes, constituenciesRes] = await Promise.all([
-              fetch(`${APIService.__API_BASE_URL || 'http://localhost:5000/api'}/governor/governor`, { headers }),
+              fetch(`${APIService.__API_BASE_URL || 'http://localhost:5000/api'}/governor`, { headers }),
               fetch(`${APIService.__API_BASE_URL || 'http://localhost:5000/api'}/constituency/`, { headers })
             ])
 
@@ -107,16 +107,16 @@ export default function AdminDataManagement({ entity }) {
             apiEndpoint = '/constituency/'
             break
           case 'financial':
-            apiEndpoint = '/governor/governor/finances'
+            apiEndpoint = '/governor/finances'
             break
           case 'allocations':
             apiEndpoint = '/constituency/allocations'
             break
           case 'audit':
-            apiEndpoint = '/governor/governor/audit'
+            apiEndpoint = '/governor/audit'
             break
           case 'departments':
-            apiEndpoint = '/governor/governor/departments'
+            apiEndpoint = '/governor/departments'
             break
           default:
             setError('Unknown entity type')
