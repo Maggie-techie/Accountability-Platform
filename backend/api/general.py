@@ -1,5 +1,5 @@
 from flask import Blueprint, request, jsonify
-from api.database import get_db
+from api.database.connection import get_db
 from datetime import datetime
 
 general_bp = Blueprint("general", __name__)

@@ -5,7 +5,8 @@ from datetime import datetime
 from flask_cors import CORS
 from flask_jwt_extended import JWTManager
 from dotenv import load_dotenv
-load_dotenv() # Load environment variables from .env file
+load_dotenv() 
+# Load environment variables from .env file
 
 # api blueprints
 from api.general import general_bp
