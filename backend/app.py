@@ -8,6 +8,7 @@ from dotenv import load_dotenv
 load_dotenv() # Load environment variables from .env file
 
 # api blueprints
+from api.general import general_bp
 
 from api.auth import auth_bp
 from api.constituency import constituency_bp
@@ -39,8 +40,7 @@ def create_app() -> Flask:
     app.register_blueprint(governor_bp,    url_prefix="/api/governor")
     app.register_blueprint(constituency_bp, url_prefix="/api/constituency")
     app.register_blueprint(ai_bp,        url_prefix="/api/ai")
-    app.register_blueprint(admin_bp,     url_prefix="/api/admin")
-
+    app.register_blueprint(general_bp,    url_prefix="/api")
 
     #  Error handlers
     @app.errorhandler(404)
