@@ -14,13 +14,15 @@ from api.auth import auth_bp
 from api.constituency import constituency_bp
 from api.governors import governor_bp
 from api.ai_engine import ai_bp
+import sys
+
+# Add project root to sys.path dynamically
+# sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 def create_app() -> Flask:
     app = Flask(__name__)
-    # Cors facilitates api fetches between flask and the frontend
 
-    CORS(app)
-
+    app.config["MONGODB_URI"] = os.getenv("MONGODB_URI")
     #  Configurations for jwt token manager, mongo database, locally installed ollama and qwen ai model
     # Configurations for JWT token manager, MongoDB database,
 # locally installed Ollama and Qwen AI model
@@ -30,11 +32,14 @@ def create_app() -> Flask:
     app.config["OLLAMA_HOST"]             = os.getenv("OLLAMA_HOST", "http://localhost:11434")
     app.config["OLLAMA_MODEL"]            = os.getenv("OLLAMA_MODEL", "qwen")
 
+    # Cors facilitates api fetches between flask and the frontend
+    CORS(app)
+
     #  Extensions
     JWTManager(app)
 
     #  Blueprints
-    app.register_blueprint(auth_bp,     url_prefix="/api/auth")
+    app.register_blueprint(auth_bp,     url_prefix="/api/auth" )
     app.register_blueprint(governor_bp,    url_prefix="/api/governor")
     app.register_blueprint(constituency_bp, url_prefix="/api/constituency")
     app.register_blueprint(ai_bp,        url_prefix="/api/ai")
@@ -48,8 +53,14 @@ def create_app() -> Flask:
     def server_error(e):
         return jsonify({"error": "internal server error", "detail": str(e)}), 500
 
+    @app.route("/")
+    def root():
+        return jsonify({"message": "Welcome to the Accountability API"})
+
     @app.route("/health")
     def health():
+        mongodb_uri = os.getenv("MONGODB_URI", "MONGO_URI")
+        mongodb_db = os.getenv("MONGODB_DB", "not_set")
         return jsonify({"status": "ok", "service": "Accountability"})
 
 

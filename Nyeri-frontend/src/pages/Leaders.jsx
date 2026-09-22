@@ -43,6 +43,52 @@ export default function Leaders() {
 
     fetchData()
   }, [])
+  
+  // Create allLeaders array from fetched data (similar to original logic)
+  const allLeaders = useMemo(() => {
+    const leaders = []
+
+    // Add governor if data exists
+    if (governorData) {
+      leaders.push({
+        id: governorData._id || governorData.id,
+        name: governorData.name,
+        position: 'Governor',
+        party: governorData.party,
+        place: governorData.county,
+        score: governorData.accountabilityScore,
+        summary: governorData.summary
+      })
+    }
+
+    // Add MPs from constituencies data
+    constituenciesData.forEach((c) => {
+      const allocation = c.allocations_ksm || {}
+      const totalAllocation = Object.values(allocation).reduce((sum, val) => sum + (val || 0), 0)
+
+      leaders.push({
+        id: c.slug,
+        name: c.mp?.name,
+        position: 'Member of Parliament',
+        party: c.mp?.party,
+        place: c.name,
+        score: c.accountabilityScore,
+        summary: `Oversees NG-CDF allocation of KSh ${totalAllocation.toFixed(1)}M for ${c.name}.`,
+      })
+    })
+
+    return leaders
+  }, [governorData, constituenciesData])
+  
+  const filtered = useMemo(() => {
+    return allLeaders.filter((l) =>
+      (!q || l.name.toLowerCase().includes(q.toLowerCase()) || l.place.toLowerCase().includes(q.toLowerCase())) &&
+      (!position || l.position === position) &&
+      (!place || l.place === place)
+    )
+  }, [q, position, place, allLeaders])
+
+  const { page, setPage, totalPages, pageItems } = usePagination(filtered, 9)
 
   // Handle case where data is still loading or there was an error
   if (loading) {
@@ -67,49 +113,6 @@ export default function Leaders() {
       </div>
     )
   }
-
-  // Create allLeaders array from fetched data (similar to original logic)
-  const allLeaders = useMemo(() => {
-    const leaders = []
-
-    // Add governor if data exists
-    if (governorData) {
-      leaders.push({
-        id: governorData.id,
-        name: governorData.name,
-        position: 'Governor',
-        party: governorData.party,
-        place: governorData.county,
-        score: governorData.accountabilityScore,
-        summary: governorData.summary
-      })
-    }
-
-    // Add MPs from constituencies data
-    constituenciesData.forEach((c) => {
-      leaders.push({
-        id: c.slug,
-        name: c.mp,
-        position: 'Member of Parliament',
-        party: c.party,
-        place: c.name,
-        score: c.accountabilityScore,
-        summary: `Oversees NG-CDF allocation of KSh ${c.totalAllocationKshm.toFixed(1)}M for ${c.name}.`,
-      })
-    })
-
-    return leaders
-  }, [governorData, constituenciesData])
-
-  const filtered = useMemo(() => {
-    return allLeaders.filter((l) =>
-      (!q || l.name.toLowerCase().includes(q.toLowerCase()) || l.place.toLowerCase().includes(q.toLowerCase())) &&
-      (!position || l.position === position) &&
-      (!place || l.place === place)
-    )
-  }, [q, position, place, allLeaders])
-
-  const { page, setPage, totalPages, pageItems } = usePagination(filtered, 9)
 
   return (
     <div className="max-w-content mx-auto px-4 sm:px-6 py-8">

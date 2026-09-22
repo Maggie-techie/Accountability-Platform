@@ -2,7 +2,7 @@ import { useState } from 'react'
 import { ChevronRight, ChevronLeft, Home } from 'lucide-react'
 import { Link } from 'react-router-dom'
 
-export function Table({ columns, rows, keyField = 'id', renderRow }) {
+export function Table({ columns, rows, keyField = 'id', renderRow, getRowKey }) {
   if (!rows || rows.length === 0) {
     return <div className="py-10 text-center text-sm text-ink-muted">No records match your filters.</div>
   }
@@ -17,8 +17,8 @@ export function Table({ columns, rows, keyField = 'id', renderRow }) {
           </tr>
         </thead>
         <tbody>
-          {rows.map((row) => (
-            <tr key={row[keyField]} className="border-b border-line last:border-0 hover:bg-forest-50/40">
+          {rows.map((row, i) => (
+            <tr key= {getRowKey ? getRowKey(row, i) : row[keyField]} className="border-b border-line last:border-0 hover:bg-forest-50/40">
               {renderRow(row)}
             </tr>
           ))}

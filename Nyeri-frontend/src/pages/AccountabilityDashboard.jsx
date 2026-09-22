@@ -3,6 +3,8 @@ import { Card, Badge } from '../components/ui'
 import { Breadcrumbs, Table } from '../components/DataDisplay'
 import { KpiCard } from '../components/Insights'
 import { constituencies, allocationTrend, departments, anomalies, auditFindings } from '../data/mockData'
+import APIService from '../services/api'
+
 
 const severityCounts = ['High', 'Medium', 'Low'].map((s) => ({
   name: s, value: anomalies.filter((a) => a.severity === s).length,
@@ -73,7 +75,7 @@ export default function AccountabilityDashboard() {
         <Table
           columns={['Constituency', 'MP', 'Score', 'Allocation FY24/25', 'Audit Opinion', 'Findings']}
           rows={constituencies}
-          keyField="slug"
+          keyField="_id"
           renderRow={(c) => (
             <>
               <td className="py-3 pr-4 font-medium text-ink">{c.name}</td>

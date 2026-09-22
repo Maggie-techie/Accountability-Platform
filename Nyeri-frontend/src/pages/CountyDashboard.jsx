@@ -143,7 +143,7 @@ export default function CountyDashboard() {
             <p className="text-sm text-ink-muted">Governor &middot; {governor.party} &middot; {governor.tenure}</p>
           </div>
         </div>
-        <Link to={`/leaders/${governor.id}`} className="text-sm text-forest-700 hover:underline">View full profile &rarr;</Link>
+        <Link to={`/leaders/${governor._id || governor.id}`} className="text-sm text-forest-700 hover:underline">View full profile &rarr;</Link>
       </Card>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -193,6 +193,7 @@ export default function CountyDashboard() {
         <Table
           columns={['Department', 'Approved Budget', 'Q3 Spend', 'Absorption', 'Status']}
           rows={departments}
+          keyField="_id"
           renderRow={(d) => (
             <>
               <td className="py-3 pr-4 font-medium text-ink">{d.department}</td>
@@ -211,10 +212,10 @@ export default function CountyDashboard() {
         <h3 className="font-serif font-semibold text-lg mb-4">Auditor-General findings, county departments</h3>
         <ul className="space-y-3">
           {countyFindings.map((f) => (
-            <li key={f.id} className="flex justify-between gap-3 text-sm border-b border-line pb-3 last:border-0">
+            <li key={f._id} className="flex justify-between gap-3 text-sm border-b border-line pb-3 last:border-0">
               <div>
                 <p className="font-medium text-ink">{f.entity} &middot; {f.category}</p>
-                <p className="text-ink-muted mt-0.5">{f.finding}</p>
+                <p className="text-ink-muted mt-0.5">{f.misappropriation_notes}</p>
               </div>
               <Badge tone={f.severity === 'High' ? 'risk' : 'watch'}>{f.severity}</Badge>
             </li>

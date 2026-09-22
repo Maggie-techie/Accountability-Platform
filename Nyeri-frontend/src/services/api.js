@@ -25,42 +25,40 @@ class APIService {
     return response.json();
   }
 
-  static async getConstituencyAllocations(slug, filters = {}) {
-    const queryParams = new URLSearchParams({ constituency_slug: slug, ...filters }).toString();
-    const response = await fetch(`${API_BASE_URL}/constituency/allocations/?${queryParams}`);
+  static async getConstituencyAllocations(slug) {
+    const response = await fetch(`${API_BASE_URL}/constituency/allocations/${slug}`);
     return response.json();
   }
 
-  static async getConstituencyAuditFindings(slug, filters = {}) {
-    const queryParams = new URLSearchParams({ constituency_slug: slug, ...filters }).toString();
-    const response = await fetch(`${API_BASE_URL}/constituency/audit/?${queryParams}`);
+  static async getConstituencyAuditFindings(slug) {
+    const response = await fetch(`${API_BASE_URL}/constituency/audit/${slug}`);
     return response.json();
   }
 
   // Governor endpoints
   static async getGovernorProfile() {
-    const response = await fetch(`${API_BASE_URL}/governor/governor`);
+    const response = await fetch(`${API_BASE_URL}/governor`);
     return response.json();
   }
 
   static async getCountyFinances(year = null) {
     const queryParams = year ? new URLSearchParams({ year }).toString() : '';
-    const response = await fetch(`${API_BASE_URL}/governor/governor/finances${queryParams ? '?' + queryParams : ''}`);
+    const response = await fetch(`${API_BASE_URL}/governor/finances${queryParams ? '?' + queryParams : ''}`);
     return response.json();
   }
 
   static async getDepartmentData() {
-    const response = await fetch(`${API_BASE_URL}/governor/governor/departments`);
+    const response = await fetch(`${API_BASE_URL}/governor/departments`);
     return response.json();
   }
 
   static async getCountyAuditFindings() {
-    const response = await fetch(`${API_BASE_URL}/governor/governor/audit`);
+    const response = await fetch(`${API_BASE_URL}/governor/audit`);
     return response.json();
   }
 
   static async getGovernorScore() {
-    const response = await fetch(`${API_BASE_URL}/governor/governor/score`);
+    const response = await fetch(`${API_BASE_URL}/governor/score`);
     return response.json();
   }
 

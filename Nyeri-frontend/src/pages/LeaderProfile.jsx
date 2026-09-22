@@ -1,38 +1,159 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { LineChart, Line, XAxis, YAxis, Tooltip as RTooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { FileDown, MessageCircleQuestion } from 'lucide-react'
 import { Card, Badge, Button } from '../components/ui'
 import { Breadcrumbs, Tabs } from '../components/DataDisplay'
-import { ScoreGauge, LimeChart, AIDisclaimer } from '../components/Insights'
-import { governor, constituencies, auditFindings, anomalies, allocationTrend } from '../data/mockData'
+import { ScoreGauge, AIDisclaimer } from '../components/Insights'
+import APIService from '../services/api'
+
+const API_BASE_URL = 'http://localhost:5000/api'
+
+// Governor-specific AI modules, with a readable title for each.
+const GOVERNOR_AI_MODULES = [
+  { key: 'fiscal_health', title: 'Fiscal health' },
+  { key: 'dept_absorption', title: 'Department budget absorption' },
+  { key: 'osr_analysis', title: 'Own-Source Revenue analysis' },
+  { key: 'department_flags', title: 'Department risk flags' },
+  { key: 'top_risks', title: 'Top county risks' },
+]
+
+// MP/constituency-specific AI modules.
+const MP_AI_MODULES = [
+  { key: 'anomalies', title: 'Anomaly detection' },
+  { key: 'risk_score', title: 'Risk score' },
+  { key: 'risk_level', title: 'Risk level' },
+  { key: 'summary', title: 'Performance summary' },
+  { key: 'peer_rank', title: 'Peer ranking' },
+  { key: 'citizen_actions', title: 'Recommended citizen actions' },
+]
+
+function getTotalAllocationTrend(constituency) {
+  const allocations = constituency?.allocations_ksm || {}
+  return Object.entries(allocations).map(([fy, amount]) => ({
+    fy: fy.replace('FY', '').replace('_', '/'),
+    allocation: amount || 0,
+  }))
+}
+
+// Turns a narrative_fields key like "risk_level" into "Risk level" for generic rendering.
+function toLabel(key) {
+  return key
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+async function fetchAiModule(url) {
+  try {
+    const res = await fetch(url)
+    const json = await res.json()
+    if (json?.success && json.data) {
+      return { narrative_fields: json.data.narrative_fields || {}, chart_data: json.data.chart_data || {} }
+    }
+    return null
+  } catch (err) {
+    console.warn(`Could not fetch AI module at ${url}:`, err)
+    return null
+  }
+}
 
 export default function LeaderProfile() {
   const { slug } = useParams()
   const navigate = useNavigate()
   const [tab, setTab] = useState('Verified Source Data')
 
-  const isGovernor = slug === governor.id
-  const constituency = constituencies.find((c) => c.slug === slug)
+  const [governorData, setGovernorData] = useState(null)
+  const [constituenciesData, setConstituenciesData] = useState([])
+  const [auditFindings, setAuditFindings] = useState([])
+  const [aiModuleResults, setAiModuleResults] = useState([]) // [{ key, title, narrative_fields, chart_data }]
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true)
+        const [governorResponse, constituenciesResponse, auditResponse] = await Promise.all([
+          APIService.getGovernorProfile(),
+          APIService.getAllConstituencies(),
+          APIService.getCountyAuditFindings(),
+        ])
+
+        setGovernorData(governorResponse)
+        setConstituenciesData(constituenciesResponse.constituencies || constituenciesResponse)
+        setAuditFindings(auditResponse.audit_findings || auditResponse || [])
+
+        // Determine leader type now that we have governorResponse, so we hit the right module set
+        const matchedGovernor = governorResponse && (slug === governorResponse._id || slug === governorResponse.id)
+        const moduleList = matchedGovernor ? GOVERNOR_AI_MODULES : MP_AI_MODULES
+
+        const results = await Promise.all(
+          moduleList.map(async ({ key, title }) => {
+            const url = matchedGovernor
+              ? `${API_BASE_URL}/ai/governor/${key}`
+              : `${API_BASE_URL}/ai/mp/${slug}/${key}`
+            const data = await fetchAiModule(url)
+            return data ? { key, title, ...data } : null
+          })
+        )
+
+        setAiModuleResults(results.filter(Boolean))
+        setError(null)
+      } catch (err) {
+        console.error('Error fetching leader profile data:', err)
+        setError(err.message || 'Failed to load leader data')
+        setGovernorData(null)
+        setConstituenciesData([])
+        setAuditFindings([])
+        setAiModuleResults([])
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchData()
+  }, [slug])
+
+  if (loading) {
+    return (
+      <div className="max-w-content mx-auto px-6 py-16 text-center text-ink-muted">
+        Loading leader profile...
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="max-w-content mx-auto px-6 py-16 text-center">
+        <h2 className="text-2xl font-semibold text-ink-danger mb-4">Error loading leader</h2>
+        <p className="text-ink-muted">{error}</p>
+        <Link to="/leaders" className="text-forest-600 hover:underline">
+          ← Back to leaders
+        </Link>
+      </div>
+    )
+  }
+
+  // Match either the governor (_id or legacy id) or a constituency (slug or _id)
+  const isGovernor = governorData && (slug === governorData._id || slug === governorData.id)
+  const constituency = constituenciesData.find((c) => c.slug === slug || c._id === slug)
+
   if (!isGovernor && !constituency) {
     return <div className="max-w-content mx-auto px-6 py-16 text-center text-ink-muted">Leader not found.</div>
   }
 
-  const name = isGovernor ? governor.name : constituency.mp
+  const name = isGovernor ? governorData.name : constituency.mp?.name
   const position = isGovernor ? 'Governor' : 'Member of Parliament'
-  const party = isGovernor ? governor.party : constituency.party
-  const place = isGovernor ? 'Nyeri County' : constituency.name
-  const score = isGovernor ? governor.accountabilityScore : constituency.accountabilityScore
+  const party = isGovernor ? governorData.party : (constituency.mp?.party || constituency.party)
+  const place = isGovernor ? (governorData.county || 'Nyeri County') : constituency.name
+  const score = isGovernor ? governorData.accountabilityScore : constituency.accountabilityScore
 
   const findings = auditFindings.filter((f) =>
-    isGovernor ? f.entityType === 'department' : f.entity.toLowerCase().includes(constituency.name.toLowerCase())
+    isGovernor
+      ? f.entityType === 'department'
+      : f.entity?.toLowerCase().includes((constituency.name || '').toLowerCase())
   )
-  const relatedAnomalies = anomalies.filter((a) =>
-    isGovernor ? a.entityType === 'Department' : a.entity.toLowerCase().includes(constituency.name.toLowerCase())
-  )
-  const trend = !isGovernor
-    ? allocationTrend.map((row) => ({ fy: row.fy, allocation: row[constituency.name] }))
-    : null
+  const trend = !isGovernor ? getTotalAllocationTrend(constituency) : []
 
   return (
     <div className="max-w-content mx-auto px-4 sm:px-6 py-8">
@@ -43,7 +164,7 @@ export default function LeaderProfile() {
         <div className="flex flex-col md:flex-row gap-6 md:items-center md:justify-between">
           <div className="flex items-center gap-4">
             <div className="h-20 w-20 rounded-full bg-forest-100 flex items-center justify-center text-forest-700 font-serif text-2xl font-semibold shrink-0">
-              {name.split(' ').slice(-1)[0][0]}
+              {name?.split(' ').slice(-1)[0]?.[0] || '?'}
             </div>
             <div>
               <h1 className="text-2xl font-serif font-semibold text-ink">{name}</h1>
@@ -60,7 +181,7 @@ export default function LeaderProfile() {
         </div>
         <div className="flex flex-wrap gap-3 mt-6 pt-6 border-t border-line">
           <Button><FileDown size={16} /> Generate Accountability Report</Button>
-          <Button variant="secondary" onClick={() => navigate(`/assistant?about=${encodeURIComponent(name)}`)}>
+          <Button variant="secondary" onClick={() => navigate(`/assistant?about=${encodeURIComponent(name || '')}`)}>
             <MessageCircleQuestion size={16} /> Ask AI about this leader
           </Button>
         </div>
@@ -112,7 +233,7 @@ export default function LeaderProfile() {
           <div className="space-y-4">
             {findings.length === 0 && <p className="text-sm text-ink-muted">No audit findings recorded for this leader in the current dataset.</p>}
             {findings.map((f) => (
-              <Card key={f.id} className="p-5">
+              <Card key={f.id || f._id} className="p-5">
                 <div className="flex justify-between gap-3 mb-2">
                   <p className="font-medium text-ink">{f.category}</p>
                   <Badge tone={f.severity === 'High' ? 'risk' : 'watch'}>{f.severity}</Badge>
@@ -127,24 +248,35 @@ export default function LeaderProfile() {
         {tab === 'AI Analysis' && (
           <div className="space-y-6">
             <AIDisclaimer />
-            {relatedAnomalies.length === 0 && <p className="text-sm text-ink-muted">No anomalies currently detected for this leader.</p>}
-            {relatedAnomalies.map((a) => (
-              <Card key={a.id} className="p-6">
-                <div className="flex justify-between gap-3 mb-3">
-                  <div>
-                    <p className="font-serif font-semibold text-ink">{a.title}</p>
-                    <p className="text-xs text-ink-faint">{a.category} &middot; FY {a.financialYear}</p>
-                  </div>
-                  <Badge tone={a.severity === 'High' ? 'risk' : a.severity === 'Medium' ? 'watch' : 'good'}>{a.severity}</Badge>
-                </div>
-                <p className="text-sm text-ink-muted mb-4">{a.summary}</p>
-                <p className="text-xs font-semibold uppercase tracking-wide text-ink-faint mb-2">LIME explanation</p>
-                <LimeChart features={a.limeFeatures} />
-                <Link to={`/anomalies/${a.id}`} className="inline-block mt-4 text-sm text-forest-700 hover:underline">
-                  Open full investigation &rarr;
-                </Link>
-              </Card>
-            ))}
+
+            {aiModuleResults.length === 0 ? (
+              <p className="text-sm text-ink-muted">
+                {isGovernor
+                  ? 'No AI analysis currently available for the county.'
+                  : 'No AI analysis currently available for this constituency.'}
+              </p>
+            ) : (
+              aiModuleResults.map((mod) => (
+                <Card key={mod.key} className="p-6">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-ink-faint mb-4">
+                    {mod.title}
+                  </p>
+
+                  {Object.entries(mod.narrative_fields).length === 0 ? (
+                    <p className="text-sm text-ink-muted">No narrative analysis returned for this module.</p>
+                  ) : (
+                    <div className="space-y-4">
+                      {Object.entries(mod.narrative_fields).map(([key, value]) => (
+                        <div key={key}>
+                          <p className="text-sm font-medium text-ink">{toLabel(key)}</p>
+                          <p className="text-sm text-ink-muted mt-0.5">{String(value)}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Card>
+              ))
+            )}
           </div>
         )}
       </div>
