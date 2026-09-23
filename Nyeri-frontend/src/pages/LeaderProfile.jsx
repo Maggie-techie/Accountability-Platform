@@ -5,7 +5,9 @@ import { FileDown, MessageCircleQuestion } from 'lucide-react'
 import { Card, Badge, Button } from '../components/ui'
 import { Breadcrumbs, Tabs } from '../components/DataDisplay'
 import { ScoreGauge, AIDisclaimer } from '../components/Insights'
+import { LEADER_PHOTOS } from '../utils/leaderPhotos'
 import APIService from '../services/api'
+
 
 const API_BASE_URL = 'http://localhost:5000/api'
 
@@ -27,6 +29,7 @@ const MP_AI_MODULES = [
   { key: 'peer_rank', title: 'Peer ranking' },
   { key: 'citizen_actions', title: 'Recommended citizen actions' },
 ]
+
 
 function getTotalAllocationTrend(constituency) {
   const allocations = constituency?.allocations_ksm || {}
@@ -58,7 +61,7 @@ async function fetchAiModule(url) {
 }
 
 export default function LeaderProfile() {
-  const { governor_slug: slug } = useParams()
+  const { slug } = useParams()
   const navigate = useNavigate()
   const [tab, setTab] = useState('Verified Source Data')
 
@@ -153,7 +156,12 @@ export default function LeaderProfile() {
   }
 
   // Match either the governor (_id or legacy id) or a constituency (slug or _id)
-  const isGovernor = governorData && (slug === governorData._id || slug === governorData.id)
+  const isGovernor = Boolean(
+  governorData &&
+  slug &&
+  (slug === governorData._id || slug === governorData.id)
+  )
+  //const isGovernor = governorData && (slug === governorData._id || slug === governorData.id)
   const constituency = constituenciesData.find((c) => c.slug === slug || c._id === slug)
 
   if (!isGovernor && !constituency) {
@@ -166,6 +174,10 @@ export default function LeaderProfile() {
   const place = isGovernor ? (governorData.county || 'Nyeri County') : constituency.name
   const score = isGovernor ? governorScore?.score : constituency?.accountabilityScore
 
+  const photoKey = isGovernor ? 'governor' : constituency.slug
+  const photo = LEADER_PHOTOS[photoKey]
+
+
   const findings = auditFindings
   const trend = !isGovernor ? getTotalAllocationTrend(constituency) : []
   const revenueByYear = countyFinances
@@ -177,7 +189,8 @@ export default function LeaderProfile() {
       }, {})
     ).sort((a, b) => a.fy.localeCompare(b.fy))
   : []
-
+  
+  console.log('DEBUG:', { slug, isGovernor, constituencySlug: constituency?.slug, photoKey })
 
   return (
     <div className="max-w-content mx-auto px-4 sm:px-6 py-8">
@@ -188,7 +201,16 @@ export default function LeaderProfile() {
         <div className="flex flex-col md:flex-row gap-6 md:items-center md:justify-between">
           <div className="flex items-center gap-4">
             <div className="h-20 w-20 rounded-full bg-forest-100 flex items-center justify-center text-forest-700 font-serif text-2xl font-semibold shrink-0">
-              {name?.split(' ').slice(-1)[0]?.[0] || '?'}
+              {photo ? (
+                <img
+                src={photo}
+                alt={name || 'Leader photo'}
+                className="h-full w-full object-cover"
+                onError={(e) => { e.currentTarget.style.display = 'none' }}
+              />
+            ) : (
+              name?.split(' ').slice(-1)[0]?.[0] || '?'
+              )}
             </div>
             <div>
               <h1 className="text-2xl font-serif font-semibold text-ink">{name}</h1>
