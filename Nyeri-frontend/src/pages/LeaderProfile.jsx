@@ -69,20 +69,23 @@ export default function LeaderProfile() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [governorScore, setGovernorScore] = useState(null)
+  const [countyFinances, setCountyFinances] = useState(null)
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true)
-        const [governorResponse, constituenciesResponse, scoreResponse] = await Promise.all([
+        const [governorResponse, constituenciesResponse, scoreResponse, financesResponse] = await Promise.all([
           APIService.getGovernorProfile(),
           APIService.getAllConstituencies(),
-          APIService.getGovernorScore()
+          APIService.getGovernorScore(),
+          APIService.getCountyFinances(),
         ])
 
         setGovernorData(governorResponse)
         setConstituenciesData(constituenciesResponse.constituencies || constituenciesResponse)
         setGovernorScore(scoreResponse)
+        setCountyFinances(financesResponse)
 
         // Determine leader type now that we have governorResponse, so we hit the right module set
         const matchedGovernor = governorResponse && (slug === governorResponse._id || slug === governorResponse.id)
@@ -120,6 +123,7 @@ export default function LeaderProfile() {
         setAuditFindings([])
         setAiModuleResults([])
         setGovernorScore(null)
+        setCountyFinances(null)
       } finally {
         setLoading(false)
       }
@@ -164,7 +168,15 @@ export default function LeaderProfile() {
 
   const findings = auditFindings
   const trend = !isGovernor ? getTotalAllocationTrend(constituency) : []
-
+  const revenueByYear = countyFinances
+  ? Object.values(
+      countyFinances.reduce((acc, r) => {
+        if (!acc[r.financial_year]) acc[r.financial_year] = { fy: r.financial_year }
+        acc[r.financial_year][r.revenue_source] = r.amount_kshb
+        return acc
+      }, {})
+    ).sort((a, b) => a.fy.localeCompare(b.fy))
+  : []
 
 
   return (
@@ -211,12 +223,19 @@ export default function LeaderProfile() {
                 </h3>
                 <div className="h-64">
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={isGovernor ? [] : trend}>
+                    <LineChart data={isGovernor ? revenueByYear : trend}>
                       <CartesianGrid stroke="#E2E5E1" vertical={false} />
                       <XAxis dataKey="fy" tick={{ fontSize: 12, fill: '#5B6560' }} axisLine={{ stroke: '#E2E5E1' }} tickLine={false} />
                       <YAxis tick={{ fontSize: 12, fill: '#5B6560' }} axisLine={false} tickLine={false} />
                       <RTooltip contentStyle={{ fontSize: 13, borderRadius: 6, borderColor: '#E2E5E1' }} />
-                      <Line type="monotone" dataKey="allocation" stroke="#14532D" strokeWidth={2} dot={{ r: 3 }} />
+                      {isGovernor ? (
+                        <>
+                          <Line type="monotone" dataKey="Equitable Share" stroke="#14532D" strokeWidth={2} dot={{ r: 3 }} />
+                          <Line type="monotone" dataKey="Conditional Grants" stroke="#8A928C" strokeWidth={2} dot={{ r: 3 }} />
+                        </>
+                      ) : (
+                        <Line type="monotone" dataKey="allocation" stroke="#14532D" strokeWidth={2} dot={{ r: 3 }} />
+                      )}           
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
