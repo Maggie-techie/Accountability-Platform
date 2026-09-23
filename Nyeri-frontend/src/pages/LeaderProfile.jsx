@@ -58,7 +58,7 @@ async function fetchAiModule(url) {
 }
 
 export default function LeaderProfile() {
-  const { slug } = useParams()
+  const { governor_slug: slug } = useParams()
   const navigate = useNavigate()
   const [tab, setTab] = useState('Verified Source Data')
 

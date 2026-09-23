@@ -187,11 +187,7 @@ export default function ConstituencyProfile() {
   ]
 
   // Filter findings and anomalies for this constituency (though they should already be filtered by backend)
-  const findings = auditFindings.filter((f) =>
-    f.entity?.toLowerCase().includes(constituency.name?.toLowerCase() || '') ||
-    constituency.name?.toLowerCase().includes(f.entity?.toLowerCase() || '') ||
-    f.entityType === 'constituency'
-  )
+  const findings = auditFindings
 
   const constAnomalies = anomaliesData.filter((a) =>
     a.entity?.toLowerCase().includes(constituency.name?.toLowerCase() || '') ||
@@ -244,13 +240,17 @@ export default function ConstituencyProfile() {
             ) : (
               <ul className="space-y-3">
                 {findings.map((f) => (
-                  <li key={f.id} className="flex justify-between gap-3 text-sm border-b border-line pb-3 last:border-0">
+                  <li key={f.id || f._id} className="flex justify-between gap-3 text-sm border-b border-line pb-3 last:border-0">
                     <div>
-                      <p className="font-medium text-ink">{f.category}</p>
-                      <p className="text-ink-muted mt-0.5">{f.finding}</p>
-                      <p className="text-xs text-ink-faint mt-1">FY {f.financialYear} &middot; KSh {f.amountKshm}M</p>
+                      <p className="font-medium text-ink">{f.id}</p>
+                      <p className="text-ink-muted mt-0.5">{f.finding || f.note}</p>
+                      {f.mp_name && (
+                       <p className="text-xs text-ink-faint mt-1">{f.mp_name}</p> 
+                      )}
                     </div>
-                    <Badge tone={f.severity === 'High' ? 'risk' : 'watch'}>{f.severity}</Badge>
+                    <Badge tone={f.finding_type === 'Misappropriation' ? 'risk' : 'good'}>
+                      {f.finding_type === 'Misappropriation' ? 'Misappropriation' : 'Correct appropriation'}
+                    </Badge>
                   </li>
                 ))}
               </ul>
