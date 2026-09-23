@@ -105,8 +105,6 @@ export default function CountyDashboard() {
   }
 
   // Transform county finances data to match expected format if needed
-  // The mock data had: { revenueSources: [...], budgetVsExpenditure: [...], developmentVsRecurrent: [...] }
-  // We need to check what the actual API returns and adapt accordingly
   const countyFindings = auditFindings.filter((f) => f.entityType === 'department')
 
   // Default transformations if API doesn't return expected format

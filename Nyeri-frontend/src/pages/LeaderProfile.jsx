@@ -73,20 +73,31 @@ export default function LeaderProfile() {
     const fetchData = async () => {
       try {
         setLoading(true)
-        const [governorResponse, constituenciesResponse, auditResponse] = await Promise.all([
+        const [governorResponse, constituenciesResponse] = await Promise.all([
           APIService.getGovernorProfile(),
           APIService.getAllConstituencies(),
-          APIService.getCountyAuditFindings(),
+          //APIService.getCountyAuditFindings(),
         ])
 
         setGovernorData(governorResponse)
         setConstituenciesData(constituenciesResponse.constituencies || constituenciesResponse)
-        setAuditFindings(auditResponse.audit_findings || auditResponse || [])
+        //setAuditFindings(auditResponse.audit_findings || auditResponse || [])
 
         // Determine leader type now that we have governorResponse, so we hit the right module set
         const matchedGovernor = governorResponse && (slug === governorResponse._id || slug === governorResponse.id)
         const moduleList = matchedGovernor ? GOVERNOR_AI_MODULES : MP_AI_MODULES
+        
+        let auditResponse = null
+        try {
+          auditResponse = matchedGovernor
+            ? await APIService.getCountyAuditFindings()
+            : await APIService.getConstituencyAuditFindings(slug)
+          } catch (err) {
+            console.error('Error fetching audit findings:', err)
+          }
 
+          setAuditFindings((auditResponse && (auditResponse.audit_findings || auditResponse)) || [])
+        
         const results = await Promise.all(
           moduleList.map(async ({ key, title }) => {
             const url = matchedGovernor
@@ -148,12 +159,10 @@ export default function LeaderProfile() {
   const place = isGovernor ? (governorData.county || 'Nyeri County') : constituency.name
   const score = isGovernor ? governorData.accountabilityScore : constituency.accountabilityScore
 
-  const findings = auditFindings.filter((f) =>
-    isGovernor
-      ? f.entityType === 'department'
-      : f.entity?.toLowerCase().includes((constituency.name || '').toLowerCase())
-  )
+  const findings = auditFindings
   const trend = !isGovernor ? getTotalAllocationTrend(constituency) : []
+
+
 
   return (
     <div className="max-w-content mx-auto px-4 sm:px-6 py-8">
@@ -228,22 +237,61 @@ export default function LeaderProfile() {
             </Card>
           </div>
         )}
+        
+        {tab === 'Audit Findings' && (() => {
+          const isSourcesRow = (f) => f.category?.trim().startsWith('Sources')
+          const realFindings = findings.filter((f) => !isSourcesRow(f))
+          const sourcesRow = findings.find(isSourcesRow)
 
-        {tab === 'Audit Findings' && (
+          return (
           <div className="space-y-4">
-            {findings.length === 0 && <p className="text-sm text-ink-muted">No audit findings recorded for this leader in the current dataset.</p>}
-            {findings.map((f) => (
-              <Card key={f.id || f._id} className="p-5">
-                <div className="flex justify-between gap-3 mb-2">
-                  <p className="font-medium text-ink">{f.category}</p>
-                  <Badge tone={f.severity === 'High' ? 'risk' : 'watch'}>{f.severity}</Badge>
-                </div>
-                <p className="text-sm text-ink-muted">{f.finding}</p>
-                <p className="text-xs text-ink-faint mt-2">FY {f.financialYear} &middot; KSh {f.amountKshm}M flagged</p>
+            {realFindings.length === 0 && <p className="text-sm text-ink-muted">No audit findings recorded for this leader in the current dataset.</p>}
+            {realFindings.map((f) => (
+              <Card key={f._id} className="p-5">
+                {isGovernor ? (
+                  <>
+                    <div className="flex justify-between gap-3 mb-2">
+                      <p className="font-medium text-ink whitespace-pre-line">{f.category}</p>
+                      <Badge tone={f.finding_type === 'misappropriation' ? 'risk' : 'good'}>
+                        {f.finding_type === 'misappropriation' ? 'Misappropriation' : 'Correct appropriation'}
+                      </Badge>
+                    </div>
+                    <p className="text-sm text-ink-muted">{f.misappropriation_notes}</p>
+                    {f.recommendation && (
+                      <p className="text-sm text-ink-muted mt-2">{f.recommendation}</p>
+                    )}
+                    <p className="text-xs text-ink-faint mt-2">
+                      {[f.financial_year, f.severity, f.amount_flagged_kshm ? `Ksh ${f.amount_flagged_kshm}M flagged` : null]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex justify-between gap-3 mb-2">
+                      <p className="font-medium text-ink">{f.id}</p>
+                      <Badge tone={f.finding_type === 'misappropriation' ? 'risk' : 'good'}>
+                        {f.finding_type === 'misappropriation' ? 'Misappropriation' : 'Correct appropriation'}
+                      </Badge>
+                    </div>
+                      <p className="text-sm text-ink-muted">{f.finding || f.note}</p>
+                        {f.mp_name && (
+                        <p className="text-xs text-ink-faint mt-2">{f.mp_name}</p>
+                        )}
+                  </>
+                )}
               </Card>
             ))}
+
+            {sourcesRow && (
+              <p className="text-xs text-ink-faint pt-2 border-t border-line whitespace-pre-line">
+                {sourcesRow.category}
+              </p>
+            )}
           </div>
-        )}
+          )
+        })()} 
+
 
         {tab === 'AI Analysis' && (
           <div className="space-y-6">
