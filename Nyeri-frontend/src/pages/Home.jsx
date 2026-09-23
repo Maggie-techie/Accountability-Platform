@@ -184,7 +184,7 @@ export default function Home() {
           <h3 className="font-serif font-semibold text-lg mb-4">Recent Auditor-General findings</h3>
           <ul className="space-y-3">
             {auditFindings.slice(0, 3).map((f) => (
-              <li key={f.id} className="text-sm border-b border-line pb-3 last:border-0">
+              <li key={f._id} className="text-sm border-b border-line pb-3 last:border-0">
                 <div className="flex justify-between gap-2">
                   <span className="font-medium text-ink">{f.entity}</span>
                   <Badge tone={f.severity === 'High' ? 'risk' : 'watch'}>{f.severity}</Badge>

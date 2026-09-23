@@ -68,25 +68,27 @@ export default function LeaderProfile() {
   const [aiModuleResults, setAiModuleResults] = useState([]) // [{ key, title, narrative_fields, chart_data }]
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [governorScore, setGovernorScore] = useState(null)
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true)
-        const [governorResponse, constituenciesResponse] = await Promise.all([
+        const [governorResponse, constituenciesResponse, scoreResponse] = await Promise.all([
           APIService.getGovernorProfile(),
           APIService.getAllConstituencies(),
-          //APIService.getCountyAuditFindings(),
+          APIService.getGovernorScore()
         ])
 
         setGovernorData(governorResponse)
         setConstituenciesData(constituenciesResponse.constituencies || constituenciesResponse)
-        //setAuditFindings(auditResponse.audit_findings || auditResponse || [])
+        setGovernorScore(scoreResponse)
 
         // Determine leader type now that we have governorResponse, so we hit the right module set
         const matchedGovernor = governorResponse && (slug === governorResponse._id || slug === governorResponse.id)
         const moduleList = matchedGovernor ? GOVERNOR_AI_MODULES : MP_AI_MODULES
-        
+    
+
         let auditResponse = null
         try {
           auditResponse = matchedGovernor
@@ -117,6 +119,7 @@ export default function LeaderProfile() {
         setConstituenciesData([])
         setAuditFindings([])
         setAiModuleResults([])
+        setGovernorScore(null)
       } finally {
         setLoading(false)
       }
@@ -157,7 +160,7 @@ export default function LeaderProfile() {
   const position = isGovernor ? 'Governor' : 'Member of Parliament'
   const party = isGovernor ? governorData.party : (constituency.mp?.party || constituency.party)
   const place = isGovernor ? (governorData.county || 'Nyeri County') : constituency.name
-  const score = isGovernor ? governorData.accountabilityScore : constituency.accountabilityScore
+  const score = isGovernor ? governorScore?.score : constituency?.accountabilityScore
 
   const findings = auditFindings
   const trend = !isGovernor ? getTotalAllocationTrend(constituency) : []
