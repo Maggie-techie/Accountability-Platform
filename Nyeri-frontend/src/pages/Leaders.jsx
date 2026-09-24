@@ -5,6 +5,7 @@ import { SearchBar, Select, FilterBar } from '../components/Filters'
 import { Breadcrumbs, Pagination, usePagination } from '../components/DataDisplay'
 import { EmptyState } from '../components/ui'
 import { scoreCategory } from '../data/mockData'
+import { LEADER_PHOTOS } from '../utils/leaderPhotos'
 import APIService from '../services/api'
 
 export default function Leaders() {
@@ -137,8 +138,63 @@ export default function Leaders() {
               return (
                 <Card key={l.id} className="p-4 flex flex-col">
                   <div className="flex items-start gap-3 mb-3">
-                    <div className="h-12 w-12 rounded-full bg-forest-100 flex items-center justify-center text-forest-700 font-serif font-semibold shrink-0">
-                      {l.name.split(' ').slice(-1)[0][0]}
+                    {/* Determine photo key based on leader type and name/place */}
+                    <div className="h-12 w-12 rounded-full bg-forest-100 flex items-center justify-center text-forest-700 font-serif font-semibold shrink-0 relative overflow-hidden">
+                      {/* Try to get photo from LEADER_PHOTOS */}
+                      {(() => {
+                        let photoKey = null;
+                        let photo = null;
+
+                        // For governor
+                        if (l.position === 'Governor') {
+                          photoKey = 'governor';
+                          photo = LEADER_PHOTOS[photoKey];
+                        }
+                        // For MPs - match by place (constituency name)
+                        else if (l.position === 'Member of Parliament') {
+                          // Normalize place name to match photo keys
+                          const normalizedPlace = l.place
+                            .toLowerCase()
+                            .replace(/\s+/g, '_') // Replace spaces with underscores
+                            .replace(/['-]/g, ''); // Remove apostrophes and hyphens
+
+                          // Check if we have a photo for this constituency
+                          if (LEADER_PHOTOS[normalizedPlace]) {
+                            photoKey = normalizedPlace;
+                            photo = LEADER_PHOTOS[photoKey];
+                          }
+                          // Special case for Mukurwe-ini (has hyphen in name)
+                          else if (l.place === 'Mukurwe-ini') {
+                            photoKey = 'mukurweini';
+                            photo = LEADER_PHOTOS[photoKey];
+                          }
+                          // Special case for Nyeri Town
+                          else if (l.place === 'Nyeri Town') {
+                            photoKey = 'nyeri_town';
+                            photo = LEADER_PHOTOS[photoKey];
+                          }
+                        }
+
+                        // Return photo if available, otherwise fall back to initials
+                        if (photo) {
+                          return (
+                            <img
+                              src={photo}
+                              alt={`${l.name} photo`}
+                              className="h-full w-full object-cover"
+                              onError={(e) => {
+                                // Fallback to initials if image fails to load
+                                e.currentTarget.onerror = null;
+                                e.currentTarget.src = '';
+                                e.currentTarget.alt = '';
+                              }}
+                            />
+                          );
+                        }
+
+                        // Fallback to initials
+                        return l.name.split(' ').slice(-1)[0][0];
+                      })()}
                     </div>
                     <div className="min-w-0">
                       <p className="font-serif font-semibold text-ink truncate">{l.name}</p>
