@@ -66,7 +66,7 @@ export default function CountyDashboard() {
 
     fetchData()
   }, [])
-
+  
   // Handle loading and error states
   if (loading) {
     return (
@@ -105,10 +105,9 @@ export default function CountyDashboard() {
   }
 
   // Transform county finances data to match expected format if needed
-  // The mock data had: { revenueSources: [...], budgetVsExpenditure: [...], developmentVsRecurrent: [...] }
-  // We need to check what the actual API returns and adapt accordingly
-  const countyFindings = auditFindings.filter((f) => f.entityType === 'department')
-
+  // const countyFindings = auditFindings.filter((f) => f.entityType === 'department')
+  //const isSourcesRow = (f) => f.category?.trim().startsWith('Sources')
+  //const countyFindings = auditFindings.filter((f) => !isSourcesRow(f))
   // Default transformations if API doesn't return expected format
   const revenueSources = countyFinances?.revenueSources || [
     { source: 'Equitable Share', amountKshb: 5.8 },
@@ -128,6 +127,33 @@ export default function CountyDashboard() {
     { fy: '2024/25', development: 2.9, recurrent: 4.3 },
     { fy: '2025/26', development: 1.4, recurrent: 2.2 },
   ]
+  // Transform county finances data to match expected format if needed
+const isSourcesRow = (f) => f.category?.trim().startsWith('Sources')
+const countyFindings = auditFindings.filter((f) => !isSourcesRow(f))
+
+// countyFinances is a flat array of { revenue_source, amount_kshb, financial_year, ... }
+const latestFy = countyFinances?.length
+  ? [...new Set(countyFinances.map((f) => f.financial_year))].sort().slice(-1)[0]
+  : null
+
+const latestRevenue = countyFinances
+  ? countyFinances.filter((f) => f.financial_year === latestFy)
+  : []
+
+const totalRevenue = latestRevenue.reduce((sum, r) => sum + (r.amount_kshb || 0), 0)
+const equitableShare = latestRevenue.find((r) => r.revenue_source === 'Equitable Share')?.amount_kshb || 0
+const ownSourceRevenue = latestRevenue.find((r) => r.revenue_source?.startsWith('Own Source Revenue'))?.amount_kshb || 0
+
+// Revenue-by-source trend across all fiscal years (real data, replaces budgetVsExpenditure)
+const revenueByYear = countyFinances
+  ? Object.values(
+      countyFinances.reduce((acc, r) => {
+        if (!acc[r.financial_year]) acc[r.financial_year] = { fy: r.financial_year }
+        acc[r.financial_year][r.revenue_source] = r.amount_kshb
+        return acc
+      }, {})
+    ).sort((a, b) => a.fy.localeCompare(b.fy))
+  : []
 
   return (
     <div className="max-w-content mx-auto px-4 sm:px-6 py-8">
@@ -147,28 +173,28 @@ export default function CountyDashboard() {
       </Card>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-        <KpiCard label="FY2025/26 Budget" value="KSh 8.0B" />
-        <KpiCard label="Equitable Share" value="KSh 5.8B" sub="72% of revenue" />
-        <KpiCard label="Own-Source Revenue" value="KSh 0.74B" change="+8% YoY" changeTone="up" />
+        <KpiCard label={`FY${latestFy || '—'} Budget`} value={`KSh ${totalRevenue.toFixed(2)}B`} />
+        <KpiCard label="Equitable Share" value={`KSh ${equitableShare.toFixed(2)}B`} sub={totalRevenue ? `${((equitableShare / totalRevenue) * 100).toFixed(0)}% of revenue` : ''} />
+        <KpiCard label="Own-Source Revenue" value={`KSh ${ownSourceRevenue.toFixed(2)}B`} />
         <KpiCard label="Open audit findings" value={String(countyFindings.length)} changeTone="down" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-        <Card className="p-6">
-          <h3 className="font-serif font-semibold text-lg mb-4">Budget vs. expenditure (KSh Billions)</h3>
-          <div className="h-64">
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={budgetVsExpenditure}>
-                <CartesianGrid stroke="#E2E5E1" vertical={false} />
-                <XAxis dataKey="fy" tick={{ fontSize: 12, fill: '#5B6560' }} axisLine={{ stroke: '#E2E5E1' }} tickLine={false} />
-                <YAxis tick={{ fontSize: 12, fill: '#5B6560' }} axisLine={false} tickLine={false} />
-                <RTooltip contentStyle={{ fontSize: 13, borderRadius: 6, borderColor: '#E2E5E1' }} />
-                <Legend wrapperStyle={{ fontSize: 12 }} />
-                <Line type="monotone" dataKey="budget" name="Budget" stroke="#8A928C" strokeDasharray="4 3" strokeWidth={2} dot={false} />
-                <Line type="monotone" dataKey="expenditure" name="Expenditure" stroke="#14532D" strokeWidth={2} dot={{ r: 3 }} />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
+          <Card className="p-6">
+            <h3 className="font-serif font-semibold text-lg mb-4">Revenue by source (KSh Billions)</h3>
+            <div className="h-64">
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={revenueByYear}>
+                  <CartesianGrid stroke="#E2E5E1" vertical={false} />
+                  <XAxis dataKey="fy" tick={{ fontSize: 12, fill: '#5B6560' }} axisLine={{ stroke: '#E2E5E1' }} tickLine={false} />
+                  <YAxis tick={{ fontSize: 12, fill: '#5B6560' }} axisLine={false} tickLine={false} />
+                  <RTooltip contentStyle={{ fontSize: 13, borderRadius: 6, borderColor: '#E2E5E1' }} />
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  <Line type="monotone" dataKey="Equitable Share" stroke="#14532D" strokeWidth={2} dot={{ r: 3 }} />
+                  <Line type="monotone" dataKey="Conditional Grants" stroke="#8A928C" strokeWidth={2} dot={{ r: 3 }} />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
         </Card>
         <Card className="p-6">
           <h3 className="font-serif font-semibold text-lg mb-4">Development vs. recurrent (KSh Billions)</h3>
@@ -187,7 +213,6 @@ export default function CountyDashboard() {
           </div>
         </Card>
       </div>
-
       <Card className="p-6 mb-6">
         <h3 className="font-serif font-semibold text-lg mb-4">Departmental absorption, FY2024/25</h3>
         <Table
@@ -197,9 +222,9 @@ export default function CountyDashboard() {
           renderRow={(d) => (
             <>
               <td className="py-3 pr-4 font-medium text-ink">{d.department}</td>
-              <td className="py-3 pr-4 text-ink-muted">KSh {d.approvedBudgetKshm}M</td>
-              <td className="py-3 pr-4 text-ink-muted">KSh {d.q3SpendKshm}M</td>
-              <td className="py-3 pr-4 text-ink-muted">{d.absorptionRate}%</td>
+              <td className="py-3 pr-4 text-ink-muted">KSh {d.approved_budget_kshm}M</td>
+              <td className="py-3 pr-4 text-ink-muted">KSh {d.q3_spend_kshm}M</td>
+              <td className="py-3 pr-4 text-ink-muted">{d.absorption_rate}%</td>
               <td className="py-3 pr-4">
                 <Badge tone={d.status === 'On Track' ? 'good' : d.status === 'Behind' ? 'watch' : 'risk'}>{d.status}</Badge>
               </td>
@@ -210,17 +235,8 @@ export default function CountyDashboard() {
 
       <Card className="p-6">
         <h3 className="font-serif font-semibold text-lg mb-4">Auditor-General findings, county departments</h3>
-        <ul className="space-y-3">
-          {countyFindings.map((f) => (
-            <li key={f._id} className="flex justify-between gap-3 text-sm border-b border-line pb-3 last:border-0">
-              <div>
-                <p className="font-medium text-ink">{f.entity} &middot; {f.category}</p>
-                <p className="text-ink-muted mt-0.5">{f.misappropriation_notes}</p>
-              </div>
-              <Badge tone={f.severity === 'High' ? 'risk' : 'watch'}>{f.severity}</Badge>
-            </li>
-          ))}
-        </ul>
+        <p className="text-3xl font-serif font-semibold text-ink">{countyFindings.length}</p>
+        <p className="text-sm text-ink-muted mt-1">Open audit findings across county departments</p>
       </Card>
     </div>
   )

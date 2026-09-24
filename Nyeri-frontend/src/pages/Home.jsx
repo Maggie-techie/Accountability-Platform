@@ -1,14 +1,77 @@
-import { useState } from 'react'
+import { useState, useEffect} from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { ArrowRight, Search, Database, Cpu, MessageSquareText, ScrollText, ShieldCheck } from 'lucide-react'
 import { Card, Badge, Button } from '../components/ui'
 import { SearchBar } from '../components/Filters'
 import { AIDisclaimer } from '../components/Insights'
-import { governor, constituencies, auditFindings, anomalies, countyFinances } from '../data/mockData'
+import APIService from '../services/api'
+
 
 export default function Home() {
   const navigate = useNavigate()
   const [q, setQ] = useState('')
+
+  const [governor, setGovernor] = useState(null)
+  const [constituencies, setConstituencies] = useState([])
+  const [auditFindings, setAuditFindings] = useState([])
+  const [anomalies, setAnomalies] = useState([])
+  const [countyFinances, setCountyFinances] = useState(null)
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        setLoading(true)
+        const [
+          governorResponse,
+          constituenciesResponse,
+          auditResponse,
+          financesResponse,
+        ] = await Promise.all([
+          APIService.getGovernorProfile(),
+          APIService.getAllConstituencies(),
+          APIService.getCountyAuditFindings(),
+          APIService.getCountyFinances(),
+        ])
+
+        setGovernor(governorResponse)
+        setConstituencies(constituenciesResponse.constituencies || constituenciesResponse || [])
+        setAuditFindings(auditResponse.audit_findings || auditResponse || [])
+        setCountyFinances(financesResponse)
+
+    } catch (err) {
+        console.error('Error fetching homepage data:', err)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    fetchData()
+  }, [])
+  
+  if (loading) {
+    return (
+      <div className="max-w-content mx-auto px-6 py-16 text-center text-ink-muted">
+        Loading...
+      </div>
+    )
+  }
+
+  if (!governor) {
+    return (
+      <div className="max-w-content mx-auto px-6 py-16 text-center text-ink-muted">
+        Unable to load county data.
+      </div>
+    )
+  }
+  
+  const latestFy = countyFinances?.length
+    ? [...new Set(countyFinances.map((f) => f.financial_year))].sort().slice(-1)[0]
+    : null
+
+  const revenueSources = countyFinances
+    ? countyFinances.filter((f) => f.financial_year === latestFy)
+    : []
 
   return (
     <div>
@@ -18,7 +81,7 @@ export default function Home() {
           <div className="max-w-2xl">
             <Badge tone="info">Nyeri County</Badge>
             <h1 className="mt-4 text-4xl sm:text-5xl leading-[1.1] font-semibold text-ink">
-              Where does Nyeri's public money actually go?
+              Where does Nyeri's public money go?
             </h1>
             <p className="mt-5 text-lg text-ink-muted max-w-xl">
               We pull together county budgets, NG-CDF allocations and Auditor-General findings, then use
@@ -68,7 +131,7 @@ export default function Home() {
               <p className="text-2xl font-serif font-semibold text-forest-700">{governor.accountabilityScore}</p>
               <p className="text-xs text-ink-muted">Accountability score</p>
             </div>
-            <Button variant="secondary" onClick={() => navigate(`/leaders/${governor.id}`)}>View profile</Button>
+            <Button variant="secondary" onClick={() => navigate(`/leaders/${governor.id || governor._id}`)}>View profile</Button>
           </div>
         </Card>
       </section>
@@ -80,20 +143,23 @@ export default function Home() {
           <Link to="/constituencies" className="text-sm text-forest-700 hover:underline">View all &rarr;</Link>
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {constituencies.map((c) => (
+          {constituencies.map((c) => {
+            const totalAllocation = Object.values(c.allocations_ksm || {}).reduce((sum, v) => sum + (v || 0), 0)
+            return(
             <Link key={c.slug} to={`/constituencies/${c.slug}`}>
               <Card className="p-4 h-full hover:border-forest-300 transition-colors">
                 <div className="flex items-center justify-between mb-2">
                   <p className="font-serif font-semibold text-ink">{c.name}</p>
-                  <Badge tone={c.accountabilityScore >= 70 ? 'good' : c.accountabilityScore >= 55 ? 'watch' : 'risk'}>
-                    {c.accountabilityScore}
+                  <Badge tone={c.audit_status === 'Unqualified' ? 'good' : c.audit_status === 'Qualified' ? 'watch' : 'risk'}>
+                    {c.audit_status}
                   </Badge>
                 </div>
-                <p className="text-sm text-ink-muted">{c.mp}</p>
-                <p className="text-xs text-ink-faint mt-2">FY2024/25 allocation: KSh {c.totalAllocationKshm.toFixed(1)}M</p>
+                <p className="text-sm text-ink-muted">{c.mp?.name}</p>
+                <p className="text-xs text-ink-faint mt-2">Total NG-CDF allocation (all years): {totalAllocation.toFixed(1)}M</p>
               </Card>
             </Link>
-          ))}
+          )
+          })}
         </div>
       </section>
 
@@ -102,10 +168,10 @@ export default function Home() {
         <Card className="p-6">
           <h3 className="font-serif font-semibold text-lg mb-4">County financial snapshot, FY2024/25</h3>
           <dl className="space-y-3">
-            {countyFinances.revenueSources.map((r) => (
-              <div key={r.source} className="flex justify-between text-sm border-b border-line pb-2 last:border-0">
-                <dt className="text-ink-muted">{r.source}</dt>
-                <dd className="font-medium text-ink">KSh {r.amountKshb}B</dd>
+            {revenueSources.map((r) => (
+              <div key={r._id} className="flex justify-between text-sm border-b border-line pb-2 last:border-0">
+                <dt className="text-ink-muted">{r.revenue_source}</dt>
+                <dd className="font-medium text-ink">KSh {r.amount_kshb}B</dd>
               </div>
             ))}
           </dl>
@@ -118,7 +184,7 @@ export default function Home() {
           <h3 className="font-serif font-semibold text-lg mb-4">Recent Auditor-General findings</h3>
           <ul className="space-y-3">
             {auditFindings.slice(0, 3).map((f) => (
-              <li key={f.id} className="text-sm border-b border-line pb-3 last:border-0">
+              <li key={f._id} className="text-sm border-b border-line pb-3 last:border-0">
                 <div className="flex justify-between gap-2">
                   <span className="font-medium text-ink">{f.entity}</span>
                   <Badge tone={f.severity === 'High' ? 'risk' : 'watch'}>{f.severity}</Badge>

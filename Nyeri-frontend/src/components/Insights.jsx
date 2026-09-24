@@ -42,7 +42,6 @@ export function ScoreGauge({ score, size = 128 }) {
         </span>
         <span className="text-xs text-ink-muted">out of 100</span>
       </div>
-      <Badge tone={tone} className="mt-3">{label}</Badge>
     </div>
   )
 }

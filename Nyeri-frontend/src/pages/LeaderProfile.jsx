@@ -5,7 +5,9 @@ import { FileDown, MessageCircleQuestion } from 'lucide-react'
 import { Card, Badge, Button } from '../components/ui'
 import { Breadcrumbs, Tabs } from '../components/DataDisplay'
 import { ScoreGauge, AIDisclaimer } from '../components/Insights'
+import { LEADER_PHOTOS } from '../utils/leaderPhotos'
 import APIService from '../services/api'
+
 
 const API_BASE_URL = 'http://localhost:5000/api'
 
@@ -27,6 +29,7 @@ const MP_AI_MODULES = [
   { key: 'peer_rank', title: 'Peer ranking' },
   { key: 'citizen_actions', title: 'Recommended citizen actions' },
 ]
+
 
 function getTotalAllocationTrend(constituency) {
   const allocations = constituency?.allocations_ksm || {}
@@ -68,25 +71,41 @@ export default function LeaderProfile() {
   const [aiModuleResults, setAiModuleResults] = useState([]) // [{ key, title, narrative_fields, chart_data }]
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [governorScore, setGovernorScore] = useState(null)
+  const [countyFinances, setCountyFinances] = useState(null)
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true)
-        const [governorResponse, constituenciesResponse, auditResponse] = await Promise.all([
+        const [governorResponse, constituenciesResponse, scoreResponse, financesResponse] = await Promise.all([
           APIService.getGovernorProfile(),
           APIService.getAllConstituencies(),
-          APIService.getCountyAuditFindings(),
+          APIService.getGovernorScore(),
+          APIService.getCountyFinances(),
         ])
 
         setGovernorData(governorResponse)
         setConstituenciesData(constituenciesResponse.constituencies || constituenciesResponse)
-        setAuditFindings(auditResponse.audit_findings || auditResponse || [])
+        setGovernorScore(scoreResponse)
+        setCountyFinances(financesResponse)
 
         // Determine leader type now that we have governorResponse, so we hit the right module set
         const matchedGovernor = governorResponse && (slug === governorResponse._id || slug === governorResponse.id)
         const moduleList = matchedGovernor ? GOVERNOR_AI_MODULES : MP_AI_MODULES
+    
 
+        let auditResponse = null
+        try {
+          auditResponse = matchedGovernor
+            ? await APIService.getCountyAuditFindings()
+            : await APIService.getConstituencyAuditFindings(slug)
+          } catch (err) {
+            console.error('Error fetching audit findings:', err)
+          }
+
+          setAuditFindings((auditResponse && (auditResponse.audit_findings || auditResponse)) || [])
+        
         const results = await Promise.all(
           moduleList.map(async ({ key, title }) => {
             const url = matchedGovernor
@@ -106,6 +125,8 @@ export default function LeaderProfile() {
         setConstituenciesData([])
         setAuditFindings([])
         setAiModuleResults([])
+        setGovernorScore(null)
+        setCountyFinances(null)
       } finally {
         setLoading(false)
       }
@@ -135,7 +156,12 @@ export default function LeaderProfile() {
   }
 
   // Match either the governor (_id or legacy id) or a constituency (slug or _id)
-  const isGovernor = governorData && (slug === governorData._id || slug === governorData.id)
+  const isGovernor = Boolean(
+  governorData &&
+  slug &&
+  (slug === governorData._id || slug === governorData.id)
+  )
+  //const isGovernor = governorData && (slug === governorData._id || slug === governorData.id)
   const constituency = constituenciesData.find((c) => c.slug === slug || c._id === slug)
 
   if (!isGovernor && !constituency) {
@@ -146,14 +172,25 @@ export default function LeaderProfile() {
   const position = isGovernor ? 'Governor' : 'Member of Parliament'
   const party = isGovernor ? governorData.party : (constituency.mp?.party || constituency.party)
   const place = isGovernor ? (governorData.county || 'Nyeri County') : constituency.name
-  const score = isGovernor ? governorData.accountabilityScore : constituency.accountabilityScore
+  const score = isGovernor ? governorScore?.score : constituency?.accountabilityScore
 
-  const findings = auditFindings.filter((f) =>
-    isGovernor
-      ? f.entityType === 'department'
-      : f.entity?.toLowerCase().includes((constituency.name || '').toLowerCase())
-  )
+  const photoKey = isGovernor ? 'governor' : constituency.slug
+  const photo = LEADER_PHOTOS[photoKey]
+
+
+  const findings = auditFindings
   const trend = !isGovernor ? getTotalAllocationTrend(constituency) : []
+  const revenueByYear = countyFinances
+  ? Object.values(
+      countyFinances.reduce((acc, r) => {
+        if (!acc[r.financial_year]) acc[r.financial_year] = { fy: r.financial_year }
+        acc[r.financial_year][r.revenue_source] = r.amount_kshb
+        return acc
+      }, {})
+    ).sort((a, b) => a.fy.localeCompare(b.fy))
+  : []
+  
+  console.log('DEBUG:', { slug, isGovernor, constituencySlug: constituency?.slug, photoKey })
 
   return (
     <div className="max-w-content mx-auto px-4 sm:px-6 py-8">
@@ -164,7 +201,16 @@ export default function LeaderProfile() {
         <div className="flex flex-col md:flex-row gap-6 md:items-center md:justify-between">
           <div className="flex items-center gap-4">
             <div className="h-20 w-20 rounded-full bg-forest-100 flex items-center justify-center text-forest-700 font-serif text-2xl font-semibold shrink-0">
-              {name?.split(' ').slice(-1)[0]?.[0] || '?'}
+              {photo ? (
+                <img
+                src={photo}
+                alt={name || 'Leader photo'}
+                className="h-full w-full object-cover"
+                onError={(e) => { e.currentTarget.style.display = 'none' }}
+              />
+            ) : (
+              name?.split(' ').slice(-1)[0]?.[0] || '?'
+              )}
             </div>
             <div>
               <h1 className="text-2xl font-serif font-semibold text-ink">{name}</h1>
@@ -199,12 +245,19 @@ export default function LeaderProfile() {
                 </h3>
                 <div className="h-64">
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={isGovernor ? [] : trend}>
+                    <LineChart data={isGovernor ? revenueByYear : trend}>
                       <CartesianGrid stroke="#E2E5E1" vertical={false} />
                       <XAxis dataKey="fy" tick={{ fontSize: 12, fill: '#5B6560' }} axisLine={{ stroke: '#E2E5E1' }} tickLine={false} />
                       <YAxis tick={{ fontSize: 12, fill: '#5B6560' }} axisLine={false} tickLine={false} />
                       <RTooltip contentStyle={{ fontSize: 13, borderRadius: 6, borderColor: '#E2E5E1' }} />
-                      <Line type="monotone" dataKey="allocation" stroke="#14532D" strokeWidth={2} dot={{ r: 3 }} />
+                      {isGovernor ? (
+                        <>
+                          <Line type="monotone" dataKey="Equitable Share" stroke="#14532D" strokeWidth={2} dot={{ r: 3 }} />
+                          <Line type="monotone" dataKey="Conditional Grants" stroke="#8A928C" strokeWidth={2} dot={{ r: 3 }} />
+                        </>
+                      ) : (
+                        <Line type="monotone" dataKey="allocation" stroke="#14532D" strokeWidth={2} dot={{ r: 3 }} />
+                      )}           
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
@@ -228,22 +281,61 @@ export default function LeaderProfile() {
             </Card>
           </div>
         )}
+        
+        {tab === 'Audit Findings' && (() => {
+          const isSourcesRow = (f) => f.category?.trim().startsWith('Sources')
+          const realFindings = findings.filter((f) => !isSourcesRow(f))
+          const sourcesRow = findings.find(isSourcesRow)
 
-        {tab === 'Audit Findings' && (
+          return (
           <div className="space-y-4">
-            {findings.length === 0 && <p className="text-sm text-ink-muted">No audit findings recorded for this leader in the current dataset.</p>}
-            {findings.map((f) => (
-              <Card key={f.id || f._id} className="p-5">
-                <div className="flex justify-between gap-3 mb-2">
-                  <p className="font-medium text-ink">{f.category}</p>
-                  <Badge tone={f.severity === 'High' ? 'risk' : 'watch'}>{f.severity}</Badge>
-                </div>
-                <p className="text-sm text-ink-muted">{f.finding}</p>
-                <p className="text-xs text-ink-faint mt-2">FY {f.financialYear} &middot; KSh {f.amountKshm}M flagged</p>
+            {realFindings.length === 0 && <p className="text-sm text-ink-muted">No audit findings recorded for this leader in the current dataset.</p>}
+            {realFindings.map((f) => (
+              <Card key={f._id} className="p-5">
+                {isGovernor ? (
+                  <>
+                    <div className="flex justify-between gap-3 mb-2">
+                      <p className="font-medium text-ink whitespace-pre-line">{f.category}</p>
+                      <Badge tone={f.finding_type === 'misappropriation' ? 'risk' : 'good'}>
+                        {f.finding_type === 'misappropriation' ? 'Misappropriation' : 'Correct appropriation'}
+                      </Badge>
+                    </div>
+                    <p className="text-sm text-ink-muted">{f.misappropriation_notes}</p>
+                    {f.recommendation && (
+                      <p className="text-sm text-ink-muted mt-2">{f.recommendation}</p>
+                    )}
+                    <p className="text-xs text-ink-faint mt-2">
+                      {[f.financial_year, f.severity, f.amount_flagged_kshm ? `Ksh ${f.amount_flagged_kshm}M flagged` : null]
+                        .filter(Boolean)
+                        .join(' · ')}
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <div className="flex justify-between gap-3 mb-2">
+                      <p className="font-medium text-ink">{f.id}</p>
+                      <Badge tone={f.finding_type === 'misappropriation' ? 'risk' : 'good'}>
+                        {f.finding_type === 'misappropriation' ? 'Misappropriation' : 'Correct appropriation'}
+                      </Badge>
+                    </div>
+                      <p className="text-sm text-ink-muted">{f.finding || f.note}</p>
+                        {f.mp_name && (
+                        <p className="text-xs text-ink-faint mt-2">{f.mp_name}</p>
+                        )}
+                  </>
+                )}
               </Card>
             ))}
+
+            {sourcesRow && (
+              <p className="text-xs text-ink-faint pt-2 border-t border-line whitespace-pre-line">
+                {sourcesRow.category}
+              </p>
+            )}
           </div>
-        )}
+          )
+        })()} 
+
 
         {tab === 'AI Analysis' && (
           <div className="space-y-6">

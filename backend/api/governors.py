@@ -74,23 +74,28 @@ def get_audit():
 
 # scoring model
 def calculate_score(finance, audit, department):
-    score = 0
+    # 1. Absorption: average across departments (already 0-100 scale each)
+    absorption_rates = [d.get("absorption_rate", 0) for d in department]
+    avg_absorption = sum(absorption_rates) / len(absorption_rates) if absorption_rates else 0
 
-    # Penalize misappropriation
-    for a in audit:
-        if a.get("finding_type") == "misappropriation":
-            score -= a.get("amount_flagged_kshm", 0)
+    # 2. Audit penalty: total misappropriated amount as a % of total revenue collected,
+    #    then subtracted from 100 (capped so a single huge finding can't go negative)
+    total_flagged_kshm = sum(
+        a.get("amount_flagged_kshm", 0)
+        for a in audit
+        if a.get("finding_type") == "misappropriation"
+    )
 
-    # Reward budget absorption
-    for d in department:
-        score += d.get("absorption_rate", 0)
+    # finance amounts are in KSh billions; convert to millions for a like-for-like comparison
+    total_revenue_kshm = sum(f.get("amount_kshb", 0) for f in finance) * 1000
+    flagged_ratio = (total_flagged_kshm / total_revenue_kshm) if total_revenue_kshm else 0
+    audit_score = max(0, 100 - (flagged_ratio * 100))
 
-    # Reward revenue collection
-    for f in finance:
-        score += f.get("amount_kshb", 0) / 1000  # scale
+    # 3. Combine with weights that sum to 1.0, then clamp to 0-100
+    score = (0.6 * avg_absorption) + (0.4 * audit_score)
+    score = max(0, min(100, score))
 
     return round(score, 2)
-
 
 @governor_bp.route("/score", methods=["GET"])
 def get_score():
