@@ -4,6 +4,7 @@ import { BarChart, Bar, LineChart, Line, XAxis, YAxis, Tooltip as RTooltip, Resp
 import { Card, Badge } from '../components/ui'
 import { Breadcrumbs, Table } from '../components/DataDisplay'
 import { KpiCard } from '../components/Insights'
+import { LEADER_PHOTOS } from '../utils/leaderPhotos'
 import APIService from '../services/api'
 
 export default function CountyDashboard() {
@@ -108,20 +109,7 @@ export default function CountyDashboard() {
   // const countyFindings = auditFindings.filter((f) => f.entityType === 'department')
   //const isSourcesRow = (f) => f.category?.trim().startsWith('Sources')
   //const countyFindings = auditFindings.filter((f) => !isSourcesRow(f))
-  // Default transformations if API doesn't return expected format
-  const revenueSources = countyFinances?.revenueSources || [
-    { source: 'Equitable Share', amountKshb: 5.8 },
-    { source: 'Conditional Grants', amountKshb: 1.2 },
-    { source: 'Own-Source Revenue', amountKshb: 0.74 },
-  ]
-
-  const budgetVsExpenditure = countyFinances?.budgetVsExpenditure || [
-    { fy: '2022/23', budget: 7.1, expenditure: 6.4 },
-    { fy: '2023/24', budget: 7.4, expenditure: 6.9 },
-    { fy: '2024/25', budget: 7.8, expenditure: 7.2 },
-    { fy: '2025/26', budget: 8.0, expenditure: 3.6 },
-  ]
-
+  // Default development vs recurrent if API doesn't return expected format
   const developmentVsRecurrent = countyFinances?.developmentVsRecurrent || [
     { fy: '2023/24', development: 2.6, recurrent: 4.3 },
     { fy: '2024/25', development: 2.9, recurrent: 4.3 },
@@ -163,7 +151,23 @@ const revenueByYear = countyFinances
 
       <Card className="p-5 mb-6 flex items-center justify-between flex-wrap gap-4">
         <div className="flex items-center gap-4">
-          <div className="h-14 w-14 rounded-full bg-forest-100 flex items-center justify-center text-forest-700 font-serif font-semibold">MK</div>
+          <div className="h-14 w-14 rounded-full bg-forest-100 flex items-center justify-center text-forest-700 font-serif font-semibold relative overflow-hidden">
+            {LEADER_PHOTOS.governor ? (
+              <img
+                src={LEADER_PHOTOS.governor}
+                alt={`${governor.name} photo`}
+                className="h-full w-full object-cover"
+                onError={(e) => {
+                  // Fallback to initials if image fails to load
+                  e.currentTarget.onerror = null;
+                  e.currentTarget.src = '';
+                  e.currentTarget.alt = '';
+                }}
+              />
+            ) : (
+              'MK'
+            )}
+          </div>
           <div>
             <p className="font-serif font-semibold text-ink">{governor.name}</p>
             <p className="text-sm text-ink-muted">Governor &middot; {governor.party} &middot; {governor.tenure}</p>
