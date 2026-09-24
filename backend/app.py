@@ -25,8 +25,11 @@ def create_app() -> Flask:
 
     app.config["MONGODB_URI"] = os.getenv("MONGODB_URI")
     #  Configurations for jwt token manager, mongo database, locally installed ollama and qwen ai model
+    # Configurations for JWT token manager, MongoDB database,
+# locally installed Ollama and Qwen AI model
     app.config["JWT_SECRET_KEY"]          = os.getenv("JWT_SECRET_KEY", "dev-secret-change-in-prod")
-    app.config["JWT_ACCESS_TOKEN_EXPIRES"] = False   # long-lived for demo; tighten in prod
+    app.config["JWT_ACCESS_TOKEN_EXPIRES"] = False
+    app.config["MONGODB_URI"]             = os.getenv("MONGODB_URI")
     app.config["OLLAMA_HOST"]             = os.getenv("OLLAMA_HOST", "http://localhost:11434")
     app.config["OLLAMA_MODEL"]            = os.getenv("OLLAMA_MODEL", "qwen")
 
