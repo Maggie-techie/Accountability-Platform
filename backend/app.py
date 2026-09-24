@@ -10,6 +10,7 @@ load_dotenv()
 
 # api blueprints
 from api.general import general_bp
+from api.reports import reports_bp
 
 from api.auth import auth_bp
 from api.constituency import constituency_bp
@@ -25,8 +26,11 @@ def create_app() -> Flask:
 
     app.config["MONGODB_URI"] = os.getenv("MONGODB_URI")
     #  Configurations for jwt token manager, mongo database, locally installed ollama and qwen ai model
+    # Configurations for JWT token manager, MongoDB database,
+# locally installed Ollama and Qwen AI model
     app.config["JWT_SECRET_KEY"]          = os.getenv("JWT_SECRET_KEY", "dev-secret-change-in-prod")
-    app.config["JWT_ACCESS_TOKEN_EXPIRES"] = False   # long-lived for demo; tighten in prod
+    app.config["JWT_ACCESS_TOKEN_EXPIRES"] = False
+    app.config["MONGODB_URI"]             = os.getenv("MONGODB_URI")
     app.config["OLLAMA_HOST"]             = os.getenv("OLLAMA_HOST", "http://localhost:11434")
     app.config["OLLAMA_MODEL"]            = os.getenv("OLLAMA_MODEL", "qwen")
 
@@ -42,6 +46,7 @@ def create_app() -> Flask:
     app.register_blueprint(constituency_bp, url_prefix="/api/constituency")
     app.register_blueprint(ai_bp,        url_prefix="/api/ai")
     app.register_blueprint(general_bp,    url_prefix="/api")
+    app.register_blueprint(reports_bp,    url_prefix="/api/reports")
 
     #  Error handlers
     @app.errorhandler(404)
