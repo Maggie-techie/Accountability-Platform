@@ -4,6 +4,7 @@ import { Card, Button } from '../components/ui'
 import { SearchBar, Select, FilterBar } from '../components/Filters'
 import { Breadcrumbs, Pagination, usePagination } from '../components/DataDisplay'
 
+
 export default function Reports() {
   const [q, setQ] = useState('')
   const [category, setCategory] = useState('')
