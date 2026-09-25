@@ -1,6 +1,19 @@
 from flask import Blueprint, request, jsonify
 from api.database.connection import get_db
 from datetime import datetime
+import sys
+import os
+
+# Add the ml_models directory to the path
+sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'ml_models'))
+
+# Import the GNN anomaly detector
+try:
+    from ml_models.gnn_anomaly_detector import get_gnn_detector
+    GNN_AVAILABLE = True
+except ImportError as e:
+    GNN_AVAILABLE = False
+    logging.warning(f"GNN anomaly detector not available: {e}")
 
 general_bp = Blueprint("general", __name__)
 
@@ -389,6 +402,110 @@ def admin_import_history():
 
     except Exception as e:
         return jsonify({"error": "Failed to fetch import history", "details": str(e)}), 500
+
+# GNN-based Anomaly Detection Endpoints
+@general_bp.route("/anomalies/gnn/train", methods=["POST"])
+def train_gnn_anomaly_model():
+    """
+    Train the GNN-based anomaly detection model
+    """
+    if not GNN_AVAILABLE:
+        return jsonify({
+            "error": "GNN anomaly detection is not available. Required dependencies are missing."
+        }), 503
+
+    try:
+        db = get_db()
+        detector = get_gnn_detector()
+
+        # Train the model
+        result = detector.train(db)
+
+        if result["status"] == "success":
+            return jsonify({
+                "success": True,
+                "message": "GNN anomaly detection model trained successfully",
+                "data": result
+            }), 200
+        else:
+            return jsonify({
+                "error": "Failed to train GNN model",
+                "details": result
+            }), 500
+
+    except Exception as e:
+        logging.error(f"Error in GNN model training: {e}")
+        return jsonify({"error": "Internal server error", "details": str(e)}), 500
+
+
+@general_bp.route("/anomalies/gnn/detect", methods=["GET"])
+def detect_gnn_anomalies():
+    """
+    Detect anomalies using the trained GNN model
+    """
+    if not GNN_AVAILABLE:
+        return jsonify({
+            "error": "GNN anomaly detection is not available. Required dependencies are missing."
+        }), 503
+
+    try:
+        db = get_db()
+        detector = get_gnn_detector()
+
+        # Detect anomalies
+        result = detector.detect_anomalies(db)
+
+        if result["status"] == "success":
+            return jsonify({
+                "success": True,
+                "message": "GNN anomaly detection completed successfully",
+                "data": result
+            }), 200
+        else:
+            return jsonify({
+                "error": "Failed to detect anomalies with GNN model",
+                "details": result
+            }), 500
+
+    except Exception as e:
+        logging.error(f"Error in GNN anomaly detection: {e}")
+        return jsonify({"error": "Internal server error", "details": str(e)}), 500
+
+
+@general_bp.route("/anomalies/gnn/status", methods=["GET"])
+def gnn_model_status():
+    """
+    Get the status of the GNN anomaly detection model
+    """
+    if not GNN_AVAILABLE:
+        return jsonify({
+            "error": "GNN anomaly detection is not available. Required dependencies are missing."
+        }), 503
+
+    try:
+        detector = get_gnn_detector()
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "model_available": True,
+                "is_trained": detector.is_trained,
+                "model_parameters": {
+                    "input_dim": detector.input_dim,
+                    "hidden_dim": detector.hidden_dim,
+                    "embedding_dim": detector.embedding_dim
+                } if detector.is_trained else None,
+                "training_progress": {
+                    "epochs": detector.epochs,
+                    "current_loss": detector.train_losses[-1] if detector.train_losses else None,
+                    "total_epochs": detector.epochs
+                } if detector.is_trained and detector.train_losses else None
+            }
+        }), 200
+
+    except Exception as e:
+        logging.error(f"Error getting GNN model status: {e}")
+        return jsonify({"error": "Internal server error", "details": str(e)}), 500
 
 def get_governor_data(db, governor_name):
     """Get governor data for comparison"""
