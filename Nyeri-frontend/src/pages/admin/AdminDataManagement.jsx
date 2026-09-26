@@ -74,13 +74,12 @@ export default function AdminDataManagement({ entity }) {
           case 'leaders':
             // For leaders, we need to get both governor and constituencies
             const [governorRes, constituenciesRes] = await Promise.all([
-              fetch(`${APIService.__API_BASE_URL || 'http://localhost:5000/api'}/governor`, { headers }),
-              fetch(`${APIService.__API_BASE_URL || 'http://localhost:5000/api'}/constituency/`, { headers })
+              fetch(`${APIService.baseURL}/governor`, { headers }),
+              fetch(`${APIService.baseURL}/constituency/`, { headers })
             ])
 
             const governorData = await governorRes.json()
             const constituenciesData = await constituenciesRes.json()
-            const constituenciesList = constituenciesData.constituencies || constituenciesData || []
 
             // Combine into leaders format
             setData([
@@ -126,7 +125,7 @@ export default function AdminDataManagement({ entity }) {
 
         // For non-leaders entities, fetch from the API
         if (apiEndpoint) {
-          const res = await fetch(`${APIService.__API_BASE_URL || 'http://localhost:5000/api'}${apiEndpoint}`, { headers })
+          const res = await fetch(`${APIService.baseURL}${apiEndpoint}`, { headers })
 
           if (!res.ok) {
             throw new Error(`HTTP ${res.status}: ${res.statusText}`)

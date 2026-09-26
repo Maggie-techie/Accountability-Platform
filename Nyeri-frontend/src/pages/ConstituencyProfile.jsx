@@ -54,7 +54,7 @@ export default function ConstituencyProfile() {
 
         // Fetch anomalies from AI endpoint
         try {
-          const res = await fetch(`${APIService.__API_BASE_URL || 'http://localhost:5000/api'}/ai/mp/${slug}/anomalies`)
+          const res = await fetch(`${APIService.baseURL}/ai/mp/${slug}/anomalies`)
           anomaliesResponse = await res.json()
         } catch (err) {
           console.warn('Could not fetch anomalies from AI endpoint:', err)

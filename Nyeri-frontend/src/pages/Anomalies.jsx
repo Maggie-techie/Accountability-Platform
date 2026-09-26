@@ -6,8 +6,6 @@ import { Select, FilterBar } from '../components/Filters'
 import { Breadcrumbs, Table } from '../components/DataDisplay'
 import APIService from '../services/api'
 
-const API_BASE_URL = 'http://localhost:5000/api'
-
 // Turns raw anomaly points from one constituency's AI module response into
 // discrete table/card rows. chart_data.anomaly_points is documented as:
 // [{ fy: string, metric: string, value: number, expected: number }]
@@ -55,7 +53,7 @@ export default function Anomalies() {
         const results = await Promise.all(
           constituencies.map(async (c) => {
             try {
-              const res = await fetch(`${API_BASE_URL}/ai/mp/${c.slug}/anomalies`)
+              const res = await fetch(`${APIService.baseURL}/ai/mp/${c.slug}/anomalies`)
               if (!res.ok) return []
               const json = await res.json()
               if (!json?.success || !json.data) return []
