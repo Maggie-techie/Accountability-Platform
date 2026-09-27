@@ -3,6 +3,7 @@ import { FileText, Download, Eye } from 'lucide-react'
 import { Card, Button } from '../components/ui'
 import { SearchBar, Select, FilterBar } from '../components/Filters'
 import { Breadcrumbs, Pagination, usePagination } from '../components/DataDisplay'
+import APIService from '../services/api'
 
 
 export default function Reports() {
@@ -17,7 +18,7 @@ export default function Reports() {
   useEffect(() => {
     const fetchReports = async () => {
       try {
-        const response = await fetch(`${import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000'}/api/reports/`)
+        const response = await fetch(`${APIService.baseURL}/reports/`)
         if (response.ok) {
           const data = await response.json()
           setReportsList(data.reports || [])
