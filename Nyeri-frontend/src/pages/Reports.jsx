@@ -1,24 +1,91 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
 import { FileText, Download, Eye } from 'lucide-react'
-import { Card, Button, EmptyState } from '../components/ui'
+import { Card, Button } from '../components/ui'
 import { SearchBar, Select, FilterBar } from '../components/Filters'
 import { Breadcrumbs, Pagination, usePagination } from '../components/DataDisplay'
-import { reports } from '../data/mockData'
+import APIService from '../services/api'
 
-const categories = [...new Set(reports.map((r) => r.category))]
 
 export default function Reports() {
   const [q, setQ] = useState('')
   const [category, setCategory] = useState('')
   const [fy, setFy] = useState('')
 
-  const filtered = useMemo(() => reports.filter((r) =>
+  // State for fetched reports
+  const [reportsList, setReportsList] = useState([])
+
+  // Fetch reports from backend
+  useEffect(() => {
+    const fetchReports = async () => {
+      try {
+        const response = await fetch(`${APIService.baseURL}/reports/`)
+        if (response.ok) {
+          const data = await response.json()
+          setReportsList(data.reports || [])
+        } else {
+          console.warn('Failed to fetch reports from API')
+          // Fallback to empty array - no mock data
+          setReportsList([])
+        }
+      } catch (err) {
+        console.error('Error fetching reports:', err)
+        // Fallback to empty array - no mock data
+        setReportsList([])
+      }
+    }
+
+    fetchReports()
+  }, [])
+
+  const filtered = useMemo(() => reportsList.filter((r) =>
     (!q || r.title.toLowerCase().includes(q.toLowerCase())) &&
     (!category || r.category === category) &&
     (!fy || r.financialYear === fy)
-  ), [q, category, fy])
+  ), [q, category, fy, reportsList])
 
   const { page, setPage, totalPages, pageItems } = usePagination(filtered, 6)
+
+  // Function to generate downloadable content for a report
+  const generateReportContent = (report) => {
+    // Create a simple text representation of the report
+    const content = `
+Accountability Platform Report
+==============================
+
+Title: ${report.title}
+Category: ${report.category}
+Entity: ${report.entity}
+Financial Year: ${report.financialYear}
+Published: ${report.datePublished}
+
+This is a sample report from the Accountability Platform.
+In a real implementation, this would contain detailed data about:
+- Financial expenditures and revenues
+- Audit findings and recommendations
+- Project implementation status
+- Performance metrics
+
+Report ID: ${report.id}
+Generated for demonstration purposes.
+    `.trim()
+
+    return content
+  }
+
+  // Function to handle download
+  const handleDownload = (report) => {
+    const content = generateReportContent(report)
+    const blob = new Blob([content], { type: 'text/plain' })
+    const url = window.URL.createObjectURL(blob)
+
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `${report.title.replace(/\s+/g, '_')}_${report.financialYear}.txt`
+    link.click()
+
+    // Clean up
+    window.URL.revokeObjectURL(url)
+  }
 
   return (
     <div className="max-w-content mx-auto px-4 sm:px-6 py-8">
@@ -28,12 +95,14 @@ export default function Reports() {
 
       <div className="mb-4"><SearchBar value={q} onChange={setQ} placeholder="Search reports" /></div>
       <FilterBar>
-        <Select label="Report type" value={category} onChange={setCategory} options={categories} />
-        <Select label="Financial year" value={fy} onChange={setFy} options={[...new Set(reports.map((r) => r.financialYear))]} />
+        <Select label="Report type" value={category} onChange={setCategory} options={[...new Set(reportsList.map((r) => r.category))]} />
+        <Select label="Financial year" value={fy} onChange={setFy} options={[...new Set(reportsList.map((r) => r.financialYear))]} />
       </FilterBar>
 
       {filtered.length === 0 ? (
-        <EmptyState title="No reports match your search" />
+        <div className="text-center py-8 text-ink-muted">
+          No reports available. Please check back later or contact support.
+        </div>
       ) : (
         <>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-6">
@@ -48,7 +117,9 @@ export default function Reports() {
                   <p className="text-xs text-ink-faint">Published {r.datePublished}</p>
                   <div className="flex gap-3 mt-3">
                     <Button size="sm" variant="ghost"><Eye size={14} /> View</Button>
-                    <Button size="sm" variant="secondary"><Download size={14} /> Download PDF</Button>
+                    <Button size="sm" variant="secondary" onClick={() => handleDownload(r)}>
+                      <Download size={14} /> Download
+                    </Button>
                   </div>
                 </div>
               </Card>

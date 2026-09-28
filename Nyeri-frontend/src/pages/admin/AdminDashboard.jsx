@@ -34,9 +34,9 @@ export default function AdminDashboard() {
           importsRes,
           anomaliesRes
         ] = await Promise.all([
-          fetch(`${APIService.__API_BASE_URL || 'http://localhost:5000/api'}/admin/summary`, { headers }),
-          fetch(`${APIService.__API_BASE_URL || 'http://localhost:5000/api'}/admin/import-history`, { headers }),
-          fetch(`${APIService.__API_BASE_URL || 'http://localhost:5000/api'}/anomalies`, { headers }) // General anomalies endpoint
+          fetch(`${APIService.baseURL}/admin/summary`, { headers }),
+          fetch(`${APIService.baseURL}/admin/import-history`, { headers }),
+          fetch(`${APIService.baseURL}/anomalies`, { headers }) // General anomalies endpoint
         ])
 
         // Check if all responses are ok
@@ -62,7 +62,7 @@ export default function AdminDashboard() {
         if (anomaliesData.length === 0) {
           try {
             // Get a sample of constituencies to check for anomalies
-            const constituenciesRes = await fetch(`${APIService.__API_BASE_URL || 'http://localhost:5000/api'}/constituency/`, { headers })
+            const constituenciesRes = await fetch(`${APIService.baseURL}/constituency/`, { headers })
             if (constituenciesRes.ok) {
               const constituenciesJson = await constituenciesRes.json()
               const constituencies = Array.isArray(constituenciesJson) ? constituenciesJson : constituenciesJson.constituencies || []
@@ -71,7 +71,7 @@ export default function AdminDashboard() {
               const anomaliesPromises = constituencies
                 .slice(0, 5) // Limit to 5 constituencies
                 .map(c =>
-                  fetch(`${APIService.__API_BASE_URL || 'http://localhost:5000/api'}/ai/mp/${c.slug}/anomalies`)
+                  fetch(`${APIService.baseURL}/ai/mp/${c.slug}/anomalies`)
                     .then(res => res.ok ? res.json() : { success: false, data: [] })
                     .catch(() => ({ success: false, data: [] }))
                 )

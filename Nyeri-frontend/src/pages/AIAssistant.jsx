@@ -209,7 +209,7 @@ export default function AIAssistant() {
         if (method === 'POST') {
           // For POST requests, we need to send data in the body
           // This is simplified - in reality we'd need to extract more specific params from the question
-          response = await fetch(`${APIService.__API_BASE_URL || 'http://localhost:5000/api'}${endpoint}`, {
+          response = await fetch(`${APIService.baseURL}${endpoint}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -222,7 +222,7 @@ export default function AIAssistant() {
         } else {
           // For GET requests
           const queryParams = new URLSearchParams(aiParams).toString()
-          const url = `${APIService.__API_BASE_URL || 'http://localhost:5000/api'}${endpoint}${queryParams ? '?' + queryParams : ''}`
+          const url = `${APIService.baseURL}${endpoint}${queryParams ? '?' + queryParams : ''}`
           response = await fetch(url)
         }
 

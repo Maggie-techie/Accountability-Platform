@@ -8,9 +8,6 @@ import { ScoreGauge, AIDisclaimer } from '../components/Insights'
 import { LEADER_PHOTOS } from '../utils/leaderPhotos'
 import APIService from '../services/api'
 
-
-const API_BASE_URL = 'http://localhost:5000/api'
-
 // Governor-specific AI modules, with a readable title for each.
 const GOVERNOR_AI_MODULES = [
   { key: 'fiscal_health', title: 'Fiscal health' },
@@ -46,8 +43,11 @@ function toLabel(key) {
     .replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
-async function fetchAiModule(url) {
+async function fetchAiModule(key, isGovernor) {
   try {
+    const url = isGovernor
+      ? `${APIService.baseURL}/ai/governor/${key}`
+      : `${APIService.baseURL}/ai/mp/${slug}/${key}`
     const res = await fetch(url)
     const json = await res.json()
     if (json?.success && json.data) {
@@ -55,7 +55,7 @@ async function fetchAiModule(url) {
     }
     return null
   } catch (err) {
-    console.warn(`Could not fetch AI module at ${url}:`, err)
+    console.warn(`Could not fetch AI module for key ${key}:`, err)
     return null
   }
 }
@@ -108,10 +108,7 @@ export default function LeaderProfile() {
         
         const results = await Promise.all(
           moduleList.map(async ({ key, title }) => {
-            const url = matchedGovernor
-              ? `${API_BASE_URL}/ai/governor/${key}`
-              : `${API_BASE_URL}/ai/mp/${slug}/${key}`
-            const data = await fetchAiModule(url)
+            const data = await fetchAiModule(key, matchedGovernor)
             return data ? { key, title, ...data } : null
           })
         )

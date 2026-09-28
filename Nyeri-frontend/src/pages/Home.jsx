@@ -1,10 +1,11 @@
 import { useState, useEffect} from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { ArrowRight, Search, Database, Cpu, MessageSquareText, ScrollText, ShieldCheck } from 'lucide-react'
+import { ArrowRight, Database, Cpu, MessageSquareText, ScrollText, ShieldCheck } from 'lucide-react'
 import { Card, Badge, Button } from '../components/ui'
 import { SearchBar } from '../components/Filters'
 import { AIDisclaimer } from '../components/Insights'
 import APIService from '../services/api'
+import { LEADER_PHOTOS } from '../utils/leaderPhotos'
 
 
 export default function Home() {
@@ -14,7 +15,6 @@ export default function Home() {
   const [governor, setGovernor] = useState(null)
   const [constituencies, setConstituencies] = useState([])
   const [auditFindings, setAuditFindings] = useState([])
-  const [anomalies, setAnomalies] = useState([])
   const [countyFinances, setCountyFinances] = useState(null)
   const [loading, setLoading] = useState(true)
 
@@ -110,15 +110,32 @@ export default function Home() {
         <Stat label="Constituencies covered" value="6" />
         <Stat label="FY2024/25 county budget" value="KSh 7.8B" />
         <Stat label="Open audit findings" value={String(auditFindings.length)} />
-        <Stat label="AI-flagged anomalies" value={String(anomalies.length)} />
       </section>
 
       {/* Governor overview */}
       <section className="max-w-content mx-auto px-4 sm:px-6 py-6">
         <Card className="p-6 flex flex-col sm:flex-row sm:items-center gap-6 justify-between">
           <div className="flex items-center gap-4">
-            <div className="h-16 w-16 rounded-full bg-forest-100 flex items-center justify-center text-forest-700 font-serif text-xl font-semibold shrink-0">
-              MK
+            <div className="h-16 w-16 rounded-full bg-forest-100 flex items-center justify-center text-forest-700 font-serif text-xl font-semibold shrink-0 relative overflow-hidden">
+              {(() => {
+                const photo = LEADER_PHOTOS.governor;
+                if (photo) {
+                  return (
+                    <img
+                      src={photo}
+                      alt={`${governor.name} photo`}
+                      className="h-full w-full object-cover"
+                      onError={(e) => {
+                        e.currentTarget.onerror = null;
+                        e.currentTarget.src = '';
+                        e.currentTarget.alt = '';
+                      }}
+                    />
+                  );
+                }
+                // Fallback to initials
+                return governor.name.split(' ').slice(-1)[0][0];
+              })()}
             </div>
             <div>
               <p className="text-xs text-ink-faint uppercase tracking-wide">County Governor</p>
