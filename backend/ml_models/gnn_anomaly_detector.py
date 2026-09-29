@@ -1,463 +1,472 @@
 """
 GNN-Based Anomaly Detection Model for Public Funds Accountability
-Implements a Graph Variational Autoencoder (GVAE) for detecting anomalous
-expenditure patterns, financial inconsistencies, and suspicious governance relationships.
+
+Graph Variational Autoencoder (GVAE) that embeds constituency-year and
+governor-year nodes, then flags nodes whose embeddings / connectivity look
+unusual compared with their peers.
 """
 
+import logging
+import os
+import re
+from datetime import datetime
+from typing import Any, Dict, List, Tuple
+
 import numpy as np
-import pandas as pd
 import torch
 import torch.nn as torch_nn
 import torch.nn.functional as F
-from torch_geometric.nn import GCNConv, VGAE, InnerProductDecoder
-from torch_geometric.data import Data
-from torch_geometric.utils import train_test_split_edges
+from sklearn.ensemble import IsolationForest
+from sklearn.metrics import pairwise_distances
 from sklearn.preprocessing import StandardScaler
-from sklearn.metrics import roc_auc_score
-import json
-import logging
-from datetime import datetime
-from typing import Dict, List, Tuple, Optional, Any
-import os
+from torch_geometric.data import Data
+from torch_geometric.nn import GCNConv, InnerProductDecoder, VGAE
+from torch_geometric.transforms import RandomLinkSplit
 
-# Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+MODEL_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "saved", "gnn_anomaly_model.pt")
+
+# Fallbacks used only if the database has nothing to derive these from
+DEFAULT_CONSTITUENCIES = [
+    {"name": "Tetu", "slug": "tetu"},
+    {"name": "Kieni", "slug": "kieni"},
+    {"name": "Mathira", "slug": "mathira"},
+    {"name": "Othaya", "slug": "othaya"},
+    {"name": "Mukurweini", "slug": "mukurweini"},
+    {"name": "Nyeri Town", "slug": "nyeri_town"},
+]
+DEFAULT_START_YEARS = [2022, 2023, 2024]
+URBAN_SLUGS = {"nyeri_town"}
+NORTHERN_SLUGS = {"tetu", "kieni"}
+
+# Matches "FY2022_23", "FY2022/23", "2022/23", "2022-23" ...
+FY_RE = re.compile(r"(20\d{2})\s*[/_\-]\s*(\d{2})")
+# Fields that may carry a financial year, depending on the collection
+FY_KEYS = ("fy_key", "fy_display", "financial_year", "fy_reviewed", "fy", "year")
+AMOUNT_RE = re.compile(r"([\d,]*\.?\d+)\s*([kKmMbB])?")
+
+
+# ---------------------------------------------------------------------------
+# Helpers
+# ---------------------------------------------------------------------------
+def fy_start_years(value) -> set:
+    """
+    Start years covered by a financial-year string. A range such as
+    "FY2022/23 - FY2024/25" covers 2022, 2023 and 2024. "Legacy" covers none.
+    """
+    if value is None:
+        return set()
+    starts = [int(m.group(1)) for m in FY_RE.finditer(str(value))]
+    if not starts:
+        return set()
+    return set(range(min(starts), max(starts) + 1))
+
+
+def doc_in_year(doc: Dict, start_year: int) -> bool:
+    return any(start_year in fy_start_years(doc.get(key)) for key in FY_KEYS)
+
+
+def fy_label(start_year: int) -> str:
+    return f"{start_year}/{str(start_year + 1)[-2:]}"
+
+
+def to_float(value) -> float:
+    """
+    Parse numbers or strings like "Ksh 2.1M" safely. Suffixes are converted to
+    millions (k -> 0.001, m -> 1, b -> 1000); bare numbers are returned as-is.
+    """
+    if value is None or value == "":
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    m = AMOUNT_RE.search(str(value))
+    if not m:
+        return 0.0
+    number = float(m.group(1).replace(",", ""))
+    multiplier = {"k": 0.001, "m": 1.0, "b": 1000.0}.get((m.group(2) or "").lower(), 1.0)
+    return number * multiplier
+
+
+# ---------------------------------------------------------------------------
+# Model
+# ---------------------------------------------------------------------------
 class VariationalGCNEncoder(torch_nn.Module):
-    """
-    Variational Graph Convolutional Network Encoder for VGAE
-    """
-    def __init__(self, in_channels: int, out_channels: int):
-        super(VariationalGCNEncoder, self).__init__()
-        self.conv1 = GCNConv(in_channels, 2 * out_channels)
-        self.conv_mu = GCNConv(2 * out_channels, out_channels)
-        self.conv_logstd = GCNConv(2 * out_channels, out_channels)
+    def __init__(self, in_channels: int, hidden_channels: int, out_channels: int):
+        super().__init__()
+        self.conv1 = GCNConv(in_channels, hidden_channels)
+        self.conv_mu = GCNConv(hidden_channels, out_channels)
+        self.conv_logstd = GCNConv(hidden_channels, out_channels)
 
     def forward(self, x: torch.Tensor, edge_index: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
-        # First GCN layer
         x = F.relu(self.conv1(x, edge_index))
         x = F.dropout(x, training=self.training)
-
-        # Return mean and log standard deviation
         return self.conv_mu(x, edge_index), self.conv_logstd(x, edge_index)
 
+
 class GVAEAnomalyDetector:
-    """
-    Graph Variational AutoEncoder for anomaly detection in public funds data
-    """
-
-    def __init__(self,
-                 input_dim: int = 16,
-                 hidden_dim: int = 32,
-                 embedding_dim: int = 16,
-                 learning_rate: float = 0.01,
-                 epochs: int = 200):
-        """
-        Initialize the GNN anomaly detector
-
-        Args:
-            input_dim: Number of input features per node
-            hidden_dim: Dimension of hidden layers
-            embedding_dim: Dimension of node embeddings
-            learning_rate: Learning rate for optimizer
-            epochs: Number of training epochs
-        """
+    def __init__(
+        self,
+        input_dim: int = 16,
+        hidden_dim: int = 32,
+        embedding_dim: int = 16,
+        learning_rate: float = 0.01,
+        epochs: int = 200,
+    ):
         self.input_dim = input_dim
         self.hidden_dim = hidden_dim
         self.embedding_dim = embedding_dim
         self.learning_rate = learning_rate
         self.epochs = epochs
 
-        # Initialize model components
-        self.encoder = VariationalGCNEncoder(input_dim, embedding_dim)
-        self.decoder = InnerProductDecoder()
-        self.model = VGAE(self.encoder, self.decoder)
-
-        # Initialize optimizer
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=learning_rate)
-
-        # Initialize scalers for feature normalization
         self.feature_scaler = StandardScaler()
-
-        # Track training history
-        self.train_losses = []
+        self.train_losses: List[float] = []
         self.is_trained = False
 
-        # Node and edge mappings for interpretation
-        self.node_mapping = {}  # Maps node_id -> (constituency, year, type)
-        self.reverse_mapping = {}  # Maps (constituency, year, type) -> node_id
+        # Metadata exposed through the status endpoint
+        self.trained_at = None
+        self.num_nodes = 0
+        self.num_edges = 0
+        self.val_auc = None
+        self.training_history: List[Dict[str, Any]] = []
 
-    def extract_features_from_db(self, db_connection) -> Tuple[np.ndarray, List[Dict]]:
+        # node_id -> (type, entity, fiscal_year) and the reverse
+        self.node_mapping: Dict[int, Tuple[str, str, str]] = {}
+        self.reverse_mapping: Dict[Tuple[str, str, str], int] = {}
+
+        self._build_model()
+
+    def _build_model(self):
+        """(Re)create the network with fresh weights and a fresh optimizer."""
+        self.encoder = VariationalGCNEncoder(self.input_dim, self.hidden_dim, self.embedding_dim)
+        self.decoder = InnerProductDecoder()
+        self.model = VGAE(self.encoder, self.decoder)
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.learning_rate)
+
+    # ------------------------------------------------------------------
+    # Feature extraction
+    # ------------------------------------------------------------------
+    @staticmethod
+    def _load_constituencies(db) -> List[Dict[str, str]]:
+        try:
+            docs = list(db.constituencies.find({}, {"_id": 0, "name": 1, "slug": 1}))
+            docs = [d for d in docs if d.get("slug")]
+            if docs:
+                return [{"name": d.get("name") or d["slug"], "slug": d["slug"]} for d in docs]
+        except Exception as e:
+            logger.warning(f"Could not load constituencies, using defaults: {e}")
+        return DEFAULT_CONSTITUENCIES
+
+    @staticmethod
+    def _load_fiscal_years(db) -> List[int]:
+        years = set()
+        try:
+            for key in db.allocations.distinct("fy_key"):
+                starts = fy_start_years(key)
+                if starts:
+                    years.add(min(starts))
+        except Exception as e:
+            logger.warning(f"Could not load fiscal years, using defaults: {e}")
+        return sorted(years) or DEFAULT_START_YEARS
+
+    def extract_features_from_db(self, db, fit_scaler: bool = True) -> Tuple[np.ndarray, List[Dict]]:
         """
-        Extract features from MongoDB collections for graph construction
+        Build one feature vector per node.
 
-        Returns:
-            features: Normalized feature matrix (n_nodes x input_dim)
-            node_info: List of dictionaries containing node metadata
+        fit_scaler=True refits the StandardScaler (training). At detection time
+        pass False so the same scaling learned during training is reused.
         """
         logger.info("Extracting features from database...")
 
-        # Get database connection
-        db = db_connection
+        self.node_mapping, self.reverse_mapping = {}, {}
 
-        # Define constituencies in Nyeri County (hardcoded for now, could be fetched)
-        constituencies = [
-            {"name": "Tetu", "slug": "tetu"},
-            {"name": "Kieni", "slug": "kieni"},
-            {"name": "Mathira", "slug": "mathira"},
-            {"name": "Othaya", "slug": "othaya"},
-            {"name": "Mukurwe-ini", "slug": "mukurweini"},
-            {"name": "Nyeri Town", "slug": "nyeri_town"}
-        ]
+        constituencies = self._load_constituencies(db)
+        start_years = self._load_fiscal_years(db)
+        n_years = len(start_years)
 
-        # Define fiscal years available in data
-        fiscal_years = ["2022/23", "2023/24", "2024/25"]  # Could be fetched dynamically
+        # Load each collection once and filter in Python (datasets are small)
+        allocations = list(db.allocations.find({}, {"_id": 0}))
+        mp_findings = list(db.audit_findings.find({}, {"_id": 0}))
+        gov_profile = db.county_leaders.find_one()
+        gov_finances = list(db.county_finances.find({}, {"_id": 0}))
+        gov_findings = list(db.county_audit_findings.find({}, {"_id": 0}))
+        dept_rows = list(db.department_absorption.find({}, {"_id": 0}))
 
-        # Define major departments (could be fetched from department_absorption)
-        departments = ["Health", "Water", "Roads", "Agriculture", "Education"]
+        node_features: List[List[float]] = []
+        node_info: List[Dict[str, Any]] = []
 
-        node_features = []
-        node_info = []
-        node_id = 0
+        def register(info: Dict[str, Any]):
+            node_id = len(node_info)
+            info["node_id"] = node_id
+            node_info.append(info)
+            key = (info["type"], info["entity"], info["fiscal_year"])
+            self.node_mapping[node_id] = key
+            self.reverse_mapping[key] = node_id
 
-        # Process Constituency-Year nodes
-        for constituency in constituencies:
-            for year in fiscal_years:
-                # Extract financial features
-                allocations = list(db.allocations.find({
-                    "constituency_slug": constituency["slug"],
-                    "fy_key": year.replace("/", "_")  # Convert to FY2022_23 format
-                }))
+        def pad(features: List[float]) -> List[float]:
+            if len(features) < self.input_dim:
+                return features + [0.0] * (self.input_dim - len(features))
+            return features[: self.input_dim]
 
-                total_allocation = sum(alloc.get("amount_kshm", 0) for alloc in allocations)
-                avg_allocation = total_allocation / len(allocations) if allocations else 0
+        # ---- Constituency-year nodes ----
+        for c in constituencies:
+            slug = c["slug"]
+            c_findings_all = [f for f in mp_findings if f.get("constituency_slug") == slug]
+            all_misap = sum(1 for f in c_findings_all if f.get("finding_type") == "misappropriation")
 
-                # Extract audit features
-                audit_findings = list(db.audit_findings.find({
-                    "constituency": constituency["name"],
-                    "fy_reviewed": year
-                }))
+            for idx, year in enumerate(start_years):
+                c_allocs = [a for a in allocations if a.get("constituency_slug") == slug and doc_in_year(a, year)]
+                total_allocation = sum(to_float(a.get("amount_kshm")) for a in c_allocs)  # KShM
+                avg_allocation = total_allocation / len(c_allocs) if c_allocs else 0.0
 
-                num_findings = len(audit_findings)
-                misappropriation_count = sum(1 for f in audit_findings
-                                           if f.get("finding_type") == "misappropriation")
-                total_flagged = sum(f.get("amount_at_risk", 0)
-                                  for f in audit_findings if f.get("amount_at_risk"))
+                y_findings = [f for f in c_findings_all if doc_in_year(f, year)]
+                num_findings = len(y_findings)
+                misap_count = sum(1 for f in y_findings if f.get("finding_type") == "misappropriation")
+                total_flagged = sum(to_float(f.get("amount_at_risk")) for f in y_findings)  # KShM
 
-                # Calculate additional features
-                allocation_growth = 0  # Would need previous year data
-                audit_severity_score = 0  # Would need severity weighting
+                is_urban = 1.0 if slug in URBAN_SLUGS else 0.0
+                year_frac = idx / max(1, n_years - 1)
 
-                # Construct feature vector for constituency-year node
                 features = [
-                    # Financial features (normalized)
-                    total_allocation / 1000.0,  # Scale to billions
-                    avg_allocation / 100.0,     # Scale to hundreds of millions
-                    len(allocations),           # Number of allocation records
-
-                    # Audit features
-                    num_findings / 10.0,        # Normalize by expected max
-                    misappropriation_count / 5.0, # Normalize
-                    total_flagged / 100.0,      # Scale flagged amounts
-
-                    # Temporal features (would be enhanced with historical data)
-                    hash(year) % 100 / 100.0,   # Pseudo-temporal feature
-                    len(fiscal_years) - fiscal_years.index(year) - 1,  # Years from most recent
-
-                    # Categorical features (one-hot encoded or embedded)
-                    1.0 if constituency["slug"] in ["tetu", "kieni"] else 0.0,  # Region feature
-                    1.0 if "urban" in constituency["slug"].lower() else 0.0,   # Urban/rural
-
-                    # Additional engineered features
-                    total_allocation / (num_findings + 1),  # Allocation per finding
-                    np.log1p(total_allocation),            # Log-transformed allocation
-                    num_findings / (len(allocations) + 1),  # Findings per allocation
+                    total_allocation / 1000.0,
+                    avg_allocation / 100.0,
+                    float(len(c_allocs)),
+                    num_findings / 10.0,
+                    misap_count / 5.0,
+                    total_flagged / 100.0,
+                    year_frac,
+                    float(n_years - idx - 1),  # years before the most recent
+                    1.0 if slug in NORTHERN_SLUGS else 0.0,
+                    is_urban,
+                    total_allocation / (num_findings + 1),
+                    float(np.log1p(total_allocation)),
+                    num_findings / (len(c_allocs) + 1),
+                    # Constituency-level totals: many findings carry no year
+                    len(c_findings_all) / 10.0,
+                    all_misap / 5.0,
+                    0.0,  # governor flag
                 ]
-
-                # Ensure we have exactly input_dim features
-                if len(features) < self.input_dim:
-                    features.extend([0.0] * (self.input_dim - len(features)))
-                elif len(features) > self.input_dim:
-                    features = features[:self.input_dim]
-
-                node_features.append(features)
-                node_info.append({
-                    "node_id": node_id,
+                node_features.append(pad(features))
+                register({
                     "type": "constituency_year",
-                    "constituency": constituency["name"],
-                    "constituency_slug": constituency["slug"],
-                    "fiscal_year": year,
-                    "total_allocation": total_allocation,
+                    "entity": slug,
+                    "constituency": c["name"],
+                    "constituency_slug": slug,
+                    "fiscal_year": fy_label(year),
+                    "fy_start": year,
+                    "is_urban": bool(is_urban),
+                    "total_allocation_kshm": total_allocation,
                     "num_audit_findings": num_findings,
-                    "misappropriation_count": misappropriation_count
+                    "misappropriation_count": misap_count,
+                    "amount_flagged_kshm": total_flagged,
                 })
 
-                # Update mappings
-                self.node_mapping[node_id] = ("constituency_year", constituency["name"], year)
-                self.reverse_mapping[("constituency_year", constituency["name"], year)] = node_id
-                node_id += 1
+        # ---- Governor-year nodes ----
+        if gov_profile:
+            gov_name = gov_profile.get("name") or gov_profile.get("governor") or "Governor"
+            for idx, year in enumerate(start_years):
+                finances = [f for f in gov_finances if doc_in_year(f, year)]
+                total_revenue = sum(to_float(f.get("amount_kshb")) for f in finances)  # KShB
+                num_sources = len(finances)
 
-        # Process Governor-Year nodes
-        governor_profile = db.county_leaders.find_one()
-        if governor_profile:
-            for year in fiscal_years:
-                # Extract financial data for the year
-                finances = list(db.county_finances.find({
-                    "financial_year": year
-                }))
+                y_findings = [f for f in gov_findings if doc_in_year(f, year)]
+                num_gov_findings = len(y_findings)
+                amount_flagged = sum(to_float(f.get("amount_flagged_kshm")) for f in y_findings)  # KShM
 
-                total_revenue = sum(fin.get("amount_kshb", 0) for fin in finances)
-                num_revenue_sources = len(finances)
+                depts = [d for d in dept_rows if doc_in_year(d, year)]
+                rates = [to_float(d.get("absorption_rate")) for d in depts]
+                avg_absorption = float(np.mean(rates)) if rates else 0.0
+                num_departments = len(depts)
 
-                # Extract audit data
-                gov_audit_findings = list(db.county_audit.find({
-                    "financial_year": year
-                }))
+                year_frac = idx / max(1, n_years - 1)
 
-                num_gov_findings = len(gov_audit_findings)
-                gov_misappropriation = sum(f.get("amount_flagged_kshm", 0)
-                                         for f in gov_audit_findings
-                                         if f.get("finding_type") == "misappropriation")
-
-                # Extract department performance
-                dept_absorption = list(db.department_absorption.find({
-                    "financial_year": year
-                }))
-
-                avg_absorption = np.mean([d.get("absorption_rate", 0)
-                                        for d in dept_absorption]) if dept_absorption else 0
-                num_departments = len(dept_absorption)
-
-                # Construct feature vector for governor-year node
                 features = [
-                    # Financial features
-                    total_revenue / 10.0,           # Scale to billions
-                    num_revenue_sources / 5.0,      # Normalize
-                    total_revenue / (num_revenue_sources + 1),  # Revenue per source
-
-                    # Audit features
-                    num_gov_findings / 10.0,        # Normalize
-                    gov_misappropriation / 100.0,   # Scale
-                    gov_misappropriation / (num_gov_findings + 1),  # Misappropriation per finding
-
-                    # Performance features
-                    avg_absorption,                 # Already percentage
-                    num_departments / 10.0,         # Normalize
-                    avg_absorption * num_departments,  # Combined performance
-
-                    # Temporal features
-                    hash(year) % 100 / 100.0,       # Pseudo-temporal
-                    len(fiscal_years) - fiscal_years.index(year) - 1,
-
-                    # Categorical features
-                    1.0,  # Governor node indicator
-                    0.0,  # Placeholder
-
-                    # Additional features
-                    total_revenue / (num_gov_findings + 1),  # Revenue per audit finding
-                    np.log1p(total_revenue),                # Log-transformed revenue
+                    total_revenue / 10.0,
+                    num_sources / 5.0,
+                    total_revenue / (num_sources + 1),
+                    num_gov_findings / 10.0,
+                    amount_flagged / 100.0,
+                    amount_flagged / (num_gov_findings + 1),
+                    avg_absorption,
+                    num_departments / 10.0,
+                    avg_absorption * num_departments,
+                    year_frac,
+                    float(n_years - idx - 1),
+                    0.0,  # region flag (n/a)
+                    0.0,  # urban flag (n/a)
+                    total_revenue / (num_gov_findings + 1),
+                    float(np.log1p(total_revenue)),
+                    1.0,  # governor flag
                 ]
-
-                # Ensure correct dimension
-                if len(features) < self.input_dim:
-                    features.extend([0.0] * (self.input_dim - len(features)))
-                elif len(features) > self.input_dim:
-                    features = features[:self.input_dim]
-
-                node_features.append(features)
-                node_info.append({
-                    "node_id": node_id,
+                node_features.append(pad(features))
+                register({
                     "type": "governor_year",
-                    "governor_name": governor_profile.get("name", ""),
-                    "fiscal_year": year,
-                    "total_revenue": total_revenue,
+                    "entity": "governor",
+                    "governor_name": gov_name,
+                    "fiscal_year": fy_label(year),
+                    "fy_start": year,
+                    "is_urban": False,
+                    "total_revenue_kshb": total_revenue,
                     "num_audit_findings": num_gov_findings,
-                    "misappropriation_amount": gov_misappropriation
+                    "amount_flagged_kshm": amount_flagged,
                 })
 
-                self.node_mapping[node_id] = ("governor_year", governor_profile.get("name", ""), year)
-                self.reverse_mapping[("governor_year", governor_profile.get("name", ""), year)] = node_id
-                node_id += 1
+        if not node_features:
+            return np.zeros((0, self.input_dim), dtype=np.float32), []
 
-        # Convert to numpy array and normalize
-        features_array = np.array(node_features, dtype=np.float32)
-        normalized_features = self.feature_scaler.fit_transform(features_array)
+        arr = np.array(node_features, dtype=np.float32)
+        if fit_scaler or not hasattr(self.feature_scaler, "mean_"):
+            normalized = self.feature_scaler.fit_transform(arr)
+        else:
+            normalized = self.feature_scaler.transform(arr)
+        normalized = np.nan_to_num(normalized).astype(np.float32)
 
         logger.info(f"Extracted features for {len(node_info)} nodes")
-        return normalized_features, node_info
+        return normalized, node_info
 
+    # ------------------------------------------------------------------
+    # Graph construction
+    # ------------------------------------------------------------------
     def construct_graph(self, features: np.ndarray, node_info: List[Dict]) -> Data:
-        """
-        Construct a PyTorch Geometric graph from node features and information
-
-        Args:
-            features: Normalized feature matrix (n_nodes x input_dim)
-            node_info: List of node metadata dictionaries
-
-        Returns:
-            PyTorch Geometric Data object
-        """
         logger.info("Constructing graph...")
-
         n_nodes = len(node_info)
-
-        # Convert features to tensor
         x = torch.tensor(features, dtype=torch.float)
 
-        # Initialize edge list
-        edge_list = []
+        edges = set()
+        for i in range(n_nodes):
+            a = node_info[i]
+            for j in range(i + 1, n_nodes):
+                b = node_info[j]
+                connect = False
 
-        # Create temporal edges: same constituency/department across consecutive years
-        for i, node_info_i in enumerate(node_info):
-            for j, node_info_j in enumerate(node_info):
-                if i >= j:  # Avoid duplicate edges and self-loops
-                    continue
+                if a["type"] == b["type"]:
+                    if a["entity"] == b["entity"] and abs(a["fy_start"] - b["fy_start"]) == 1:
+                        # Temporal: the SAME entity in consecutive years
+                        connect = True
+                    elif (
+                        a["type"] == "constituency_year"
+                        and a["fy_start"] == b["fy_start"]
+                        and a["is_urban"] == b["is_urban"]
+                    ):
+                        # Peers: comparable constituencies in the same year
+                        connect = True
+                elif a["fy_start"] == b["fy_start"]:
+                    # Governance: governor <-> constituencies in the same year
+                    connect = True
 
-                # Temporal edges: same entity, consecutive years
-                if (node_info_i["type"] == node_info_j["type"] and
-                    self._are_consecutive_years(node_info_i, node_info_j)):
-                    edge_list.extend([[i, j], [j, i]])  # Undirected graph
+                if connect:
+                    edges.add((i, j))
+                    edges.add((j, i))
 
-                # Similarity edges: similar entities in same year
-                elif (node_info_i["fiscal_year"] == node_info_j["fiscal_year"] and
-                      node_info_i["type"] == node_info_j["type"] and
-                      self._are_similar_entities(node_info_i, node_info_j)):
-                    edge_list.extend([[i, j], [j, i]])
-
-                # Governance edges: governor to constituencies in same year
-                elif ((node_info_i["type"] == "governor_year" and
-                       node_info_j["type"] == "constituency_year") or
-                      (node_info_i["type"] == "constituency_year" and
-                       node_info_j["type"] == "governor_year")):
-                    if self._is_same_year(node_info_i, node_info_j):
-                        edge_list.extend([[i, j], [j, i]])
-
-        # Convert edge list to tensor
-        if edge_list:
-            edge_index = torch.tensor(edge_list, dtype=torch.long).t().contiguous()
+        if edges:
+            edge_index = torch.tensor(sorted(edges), dtype=torch.long).t().contiguous()
         else:
-            # Create a minimal graph if no edges found
-            edge_index = torch.tensor([[0, 1], [1, 0]], dtype=torch.long).t().contiguous()
+            edge_index = torch.tensor([[0, 1], [1, 0]], dtype=torch.long)
 
-        # Create PyTorch Geometric Data object
         data = Data(x=x, edge_index=edge_index)
-
         logger.info(f"Constructed graph with {n_nodes} nodes and {edge_index.shape[1]} edges")
         return data
 
-    def _are_consecutive_years(self, node_info_i: Dict, node_info_j: Dict) -> bool:
-        """Check if two nodes represent consecutive years"""
-        try:
-            year_i = self._parse_fiscal_year(node_info_i["fiscal_year"])
-            year_j = self._parse_fiscal_year(node_info_j["fiscal_year"])
-            return abs(year_i - year_j) == 1
-        except:
-            return False
-
-    def _parse_fiscal_year(self, year_str: str) -> int:
-        """Convert fiscal year string to integer for comparison"""
-        # Extract start year from FY2022/23 format
-        if "/" in year_str:
-            return int(year_str.split("/")[0][2:])  # Extract 2022 from FY2022/23
-        elif "_" in year_str:
-            return int(year_str.split("_")[0][2:])  # Extract 2022 from FY2022_23
-        else:
-            return int(year_str[-2:])  # Fallback
-
-    def _are_similar_entities(self, node_info_i: Dict, node_info_j: Dict) -> bool:
-        """Check if two nodes represent similar entities (for peer comparison)"""
-        # For constituencies: same region type or similar characteristics
-        if node_info_i["type"] == "constituency_year" and node_info_j["type"] == "constituency_year":
-            # Simple similarity: same urban/rural classification
-            urban_i = "urban" in node_info_i.get("constituency_slug", "").lower()
-            urban_j = "urban" in node_info_j.get("constituency_slug", "").lower()
-            return urban_i == urban_j
-
-        # For governor years: always similar (only one governor)
-        if node_info_i["type"] == "governor_year" and node_info_j["type"] == "governor_year":
-            return True
-
-        return False
-
-    def _is_same_year(self, node_info_i: Dict, node_info_j: Dict) -> bool:
-        """Check if two nodes are from the same fiscal year"""
-        return node_info_i.get("fiscal_year") == node_info_j.get("fiscal_year")
-
+    # ------------------------------------------------------------------
+    # Training
+    # ------------------------------------------------------------------
     def train(self, db_connection) -> Dict[str, Any]:
-        """
-        Train the GNN anomaly detection model
-
-        Args:
-            db_connection: MongoDB database connection
-
-        Returns:
-            Training results dictionary
-        """
         logger.info("Starting GNN model training...")
 
-        # Extract features and construct graph
-        features, node_info = self.extract_features_from_db(db_connection)
+        features, node_info = self.extract_features_from_db(db_connection, fit_scaler=True)
+        if len(node_info) < 3:
+            return {"status": "error", "message": "Not enough data to build a graph (need at least 3 nodes)."}
+
         data = self.construct_graph(features, node_info)
+        num_nodes = int(data.num_nodes)
+        num_edges = int(data.edge_index.size(1))  # read BEFORE any edge splitting
 
-        # Move to appropriate device
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.model = self.model.to(device)
-        data = data.to(device)
+        torch.manual_seed(42)
+        np.random.seed(42)
+        self._build_model()  # retraining starts from fresh weights
 
-        # Set model to training mode
+        # Hold out a slice of edges for a link-prediction sanity check.
+        # (train_test_split_edges is deprecated and removes edge_index; use RandomLinkSplit.)
+        val_data = None
+        if num_edges // 2 >= 20:
+            split = RandomLinkSplit(
+                num_val=0.1,
+                num_test=0.1,
+                is_undirected=True,
+                add_negative_train_samples=False,
+                split_labels=True,
+            )
+            train_data, val_data, _ = split(data)
+            message_edges = train_data.edge_index          # edges used for message passing
+            train_pos_edges = train_data.pos_edge_label_index  # positives for the reconstruction loss
+        else:
+            message_edges = data.edge_index
+            train_pos_edges = data.edge_index
+
+        x = data.x
         self.model.train()
-
-        # Split edges for training/testing (we'll use link prediction as auxiliary task)
-        data = train_test_split_edges(data)
-
-        # Training loop
         self.train_losses = []
         for epoch in range(self.epochs):
             self.optimizer.zero_grad()
-
-            # Get latent node embeddings
-            z = self.model.encode(data.x, data.train_pos_edge_index)
-
-            # Compute loss
-            loss = self.model.recon_loss(z, data.pos_train_edge_index)
-
-            # Add KL divergence loss for VGAE
-            loss = loss + (1 / data.num_nodes) * self.model.kl_loss()
-
+            z = self.model.encode(x, message_edges)
+            loss = self.model.recon_loss(z, train_pos_edges)
+            loss = loss + (1.0 / num_nodes) * self.model.kl_loss()
             loss.backward()
             self.optimizer.step()
-
-            self.train_losses.append(loss.item())
+            self.train_losses.append(float(loss.item()))
 
             if epoch % 20 == 0:
-                logger.info(f'Epoch: {epoch:03d}, Loss: {loss:.4f}')
+                logger.info(f"Epoch: {epoch:03d}, Loss: {loss.item():.4f}")
+
+        val_auc = None
+        if val_data is not None:
+            try:
+                self.model.eval()
+                with torch.no_grad():
+                    z = self.model.encode(x, message_edges)
+                    auc, _ap = self.model.test(z, val_data.pos_edge_label_index, val_data.neg_edge_label_index)
+                val_auc = float(auc)
+            except Exception as e:
+                logger.warning(f"Could not compute validation AUC: {e}")
 
         self.is_trained = True
-        logger.info("Training completed!")
+        self.trained_at = datetime.now().isoformat(timespec="seconds")
+        self.num_nodes = num_nodes
+        self.num_edges = num_edges
+        self.val_auc = val_auc
+        self.training_history.append({
+            "date": self.trained_at,
+            "nodes": num_nodes,
+            "edges": num_edges,
+            "val_auc": val_auc,
+            "final_loss": self.train_losses[-1],
+            "status": "Completed",
+        })
+        self.training_history = self.training_history[-10:]
 
-        # Return training results
+        try:
+            self.save_model()
+        except Exception as e:  # saving must never fail the training request
+            logger.warning(f"Could not save model: {e}")
+
+        logger.info("Training completed!")
         return {
             "status": "success",
             "epochs": self.epochs,
-            "final_loss": self.train_losses[-1] if self.train_losses else 0,
-            "num_nodes": data.num_nodes,
-            "num_edges": data.edge_index.shape[1] if hasattr(data, 'edge_index') else 0,
-            "training_losses": self.train_losses[-10:]  # Last 10 losses
+            "final_loss": self.train_losses[-1],
+            "num_nodes": num_nodes,
+            "num_edges": num_edges,
+            "val_auc": val_auc,
+            "trained_at": self.trained_at,
+            "training_losses": self.train_losses[-10:],
         }
 
+    # ------------------------------------------------------------------
+    # Detection
+    # ------------------------------------------------------------------
     def detect_anomalies(self, db_connection) -> Dict[str, Any]:
-        """
-        Detect anomalies in the public funds data using the trained GNN model
-
-        Args:
-            db_connection: MongoDB database connection
-
-        Returns:
-            Anomaly detection results including anomaly scores and explanations
-        """
         if not self.is_trained:
-            # Try to train if not already trained
             logger.info("Model not trained, initiating training...")
             train_result = self.train(db_connection)
             if train_result["status"] != "success":
@@ -465,256 +474,215 @@ class GVAEAnomalyDetector:
 
         logger.info("Detecting anomalies...")
 
-        # Extract features and construct graph (same as training)
-        features, node_info = self.extract_features_from_db(db_connection)
+        # Reuse the scaler fitted during training
+        features, node_info = self.extract_features_from_db(db_connection, fit_scaler=False)
+        n = len(node_info)
+        if n < 3:
+            return {"status": "error", "message": "Not enough data to run detection."}
         data = self.construct_graph(features, node_info)
 
-        # Move to device
-        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-        self.model = self.model.to(device)
-        data = data.to(device)
-
-        # Set model to evaluation mode
         self.model.eval()
-
         with torch.no_grad():
-            # Get node embeddings
             z = self.model.encode(data.x, data.edge_index)
+            adj_pred = self.model.decoder.forward_all(z, sigmoid=True)  # dense n x n probabilities
 
-            # Compute reconstruction error for each node
-            # For VGAE, we can use the likelihood of the observed adjacency matrix
-            adj_pred = self.model.decoder(z)
+        z_np = z.cpu().numpy()
+        adj_np = adj_pred.cpu().numpy()
 
-            # Convert to numpy for easier handling
-            z_np = z.cpu().numpy()
-            adj_pred_np = adj_pred.cpu().numpy()
+        # 1) Connectivity reconstruction error per node
+        actual = np.zeros((n, n), dtype=np.float32)
+        ei = data.edge_index.cpu().numpy()
+        actual[ei[0], ei[1]] = 1.0
+        recon_error = np.mean((actual - adj_np) ** 2, axis=1)
 
-            # Calculate node-level anomaly scores
-            # Approach 1: Reconstruction error of node features
-            # Approach 2: Embedding-based isolation (using distance to neighbors)
-            # Approach 3: Graph structure anomaly (unexpected connections)
+        # 2) Mean distance to the k nearest neighbours in embedding space
+        k = min(5, n - 1)
+        distances = pairwise_distances(z_np)
+        knn_distance = np.mean(np.sort(distances, axis=1)[:, 1 : k + 1], axis=1)
 
-            # For simplicity, we'll use a combination of:
-            # 1. Node feature reconstruction error
-            # 2. Social anomaly score (how well connected a node is to similar nodes)
+        # 3) Isolation Forest (continuous score; higher = more anomalous)
+        iso = IsolationForest(contamination=0.1, random_state=42).fit(z_np)
+        iso_score = -iso.score_samples(z_np)
 
-            # Feature reconstruction error (would need decoder for features, not just edges)
-            # Instead, we'll use embedding-based approaches
+        def normalize(arr: np.ndarray) -> np.ndarray:
+            span = np.max(arr) - np.min(arr)
+            return np.zeros_like(arr) if span == 0 else (arr - np.min(arr)) / span
 
-            # Method 1: Distance to k-nearest neighbors in embedding space
-            from sklearn.metrics import pairwise_distances
-            embedding_distances = pairwise_distances(z_np)
-            knn_distance = np.mean(np.sort(embedding_distances, axis=1)[:, 1:6], axis=1)  # Avg distance to 5-NN
+        final_scores = 0.4 * normalize(knn_distance) + 0.3 * normalize(iso_score) + 0.3 * normalize(recon_error)
 
-            # Method 2: Isolation Forest on embeddings
-            from sklearn.ensemble import IsolationForest
-            iso_forest = IsolationForest(contamination=0.1, random_state=42)
-            anomaly_scores_iso = iso_forest.fit_predict(z_np)
-            anomaly_scores_iso = (-anomaly_scores_iso + 1) / 2  # Convert to 0-1 scale (1 = anomaly)
+        n_anomalies = max(1, int(n * 0.1))
+        top = np.argsort(final_scores)[-n_anomalies:][::-1]
 
-            # Method 3: Reconstruction-based (using edge prediction error)
-            # For each node, compute how well its connections are predicted
-            node_anomaly_scores = np.zeros(data.num_nodes)
-            for i in range(data.num_nodes):
-                # Get actual neighbors
-                if data.edge_index.shape[1] > 0:
-                    mask = (data.edge_index[0] == i) | (data.edge_index[1] == i)
-                    if np.any(mask):
-                        actual_neighbors = set()
-                        edge_indices = data.edge_index[:, mask]
-                        for k in range(edge_indices.shape[1]):
-                            src, dst = edge_indices[0, k].item(), edge_indices[1, k].item()
-                            actual_neighbors.add(dst if src == i else src)
-
-                        # Get predicted connections
-                        if i < adj_pred_np.shape[0]:
-                            pred_connections = adj_pred_np[i]
-                            # Score based on difference between actual and predicted connectivity
-                            actual_connectivity = np.zeros(len(pred_connections))
-                            for neighbor in actual_neighbors:
-                                if neighbor < len(actual_connectivity):
-                                    actual_connectivity[neighbor] = 1
-
-                            recon_error = np.mean((actual_connectivity - pred_connections) ** 2)
-                            node_anomaly_scores[i] = recon_error
-
-            # Combine anomaly scores (ensemble approach)
-            # Normalize each score to 0-1 range
-            def normalize_score(score_array):
-                if np.max(score_array) == np.min(score_array):
-                    return np.zeros_like(score_array)
-                return (score_array - np.min(score_array)) / (np.max(score_array) - np.min(score_array))
-
-            knn_score = normalize_score(knn_distance)
-            iso_score = normalize_score(anomaly_scores_iso)
-            recon_score = normalize_score(node_anomaly_scores)
-
-            # Weighted ensemble (can be tuned)
-            final_anomaly_scores = (
-                0.4 * knn_score +
-                0.3 * iso_score +
-                0.3 * recon_score
-            )
-
-            # Identify top anomalies
-            n_anomalies = max(1, int(len(final_anomaly_scores) * 0.1))  # Top 10% as anomalies
-            anomaly_indices = np.argsort(final_anomaly_scores)[-n_anomalies:][::-1]  # Descending order
-
-            # Prepare results
-            anomalies = []
-            for idx in anomaly_indices:
-                if idx < len(node_info):
-                    info = node_info[idx]
-                    anomaly_record = {
-                        "node_id": int(idx),
-                        "anomaly_score": float(final_anomaly_scores[idx]),
-                        "anomaly_rank": int(np.where(anomaly_indices == idx)[0][0] + 1),
-                        "node_type": info.get("type", "unknown"),
-                        "explanation": self._generate_anomaly_explanation(info, final_anomaly_scores[idx], z_np[idx]),
-                        "features": {
-                            "financial": {
-                                "total_allocation": info.get("total_allocation", 0),
-                                "total_revenue": info.get("total_revenue", 0),
-                            },
-                            "audit": {
-                                "num_findings": info.get("num_audit_findings", 0),
-                                "misappropriation_count": info.get("misappropriation_count", 0),
-                                "misappropriation_amount": info.get("misappropriation_amount", 0),
-                            }
-                        },
-                        "metadata": info
-                    }
-                    anomalies.append(anomaly_record)
-
-            # Overall statistics
-            results = {
-                "status": "success",
-                "timestamp": datetime.now().isoformat(),
-                "total_nodes_analyzed": len(node_info),
-                "num_anomalies_detected": len(anomalies),
-                "anomaly_rate": len(anomalies) / len(node_info) if len(node_info) > 0 else 0,
-                "anomalies": anomalies,
-                "model_info": {
-                    "input_dim": self.input_dim,
-                    "hidden_dim": self.hidden_dim,
-                    "embedding_dim": self.embedding_dim,
-                    "epochs_trained": self.epochs,
-                    "final_training_loss": self.train_losses[-1] if self.train_losses else 0
+        anomalies = []
+        for rank, idx in enumerate(top, start=1):
+            info = node_info[int(idx)]
+            anomalies.append({
+                "node_id": int(idx),
+                "anomaly_score": float(final_scores[idx]),
+                "anomaly_rank": rank,
+                "node_type": info.get("type", "unknown"),
+                "explanation": self._generate_anomaly_explanation(info, float(final_scores[idx])),
+                "features": {
+                    "financial": {
+                        "total_allocation_kshm": info.get("total_allocation_kshm", 0),
+                        "total_revenue_kshb": info.get("total_revenue_kshb", 0),
+                    },
+                    "audit": {
+                        "num_findings": info.get("num_audit_findings", 0),
+                        "misappropriation_count": info.get("misappropriation_count", 0),
+                        "amount_flagged_kshm": info.get("amount_flagged_kshm", 0),
+                    },
                 },
-                "summary_statistics": {
-                    "mean_anomaly_score": float(np.mean(final_anomaly_scores)),
-                    "std_anomaly_score": float(np.std(final_anomaly_scores)),
-                    "max_anomaly_score": float(np.max(final_anomaly_scores)),
-                    "min_anomaly_score": float(np.min(final_anomaly_scores))
-                }
-            }
+                "metadata": info,
+            })
 
-            logger.info(f"Anomaly detection completed. Found {len(anomalies)} anomalies out of {len(node_info)} nodes.")
-            return results
+        logger.info(f"Anomaly detection completed. Found {len(anomalies)} anomalies out of {n} nodes.")
+        return {
+            "status": "success",
+            "timestamp": datetime.now().isoformat(timespec="seconds"),
+            "total_nodes_analyzed": n,
+            "num_anomalies_detected": len(anomalies),
+            "anomaly_rate": len(anomalies) / n,
+            "anomalies": anomalies,
+            "model_info": {
+                "input_dim": self.input_dim,
+                "hidden_dim": self.hidden_dim,
+                "embedding_dim": self.embedding_dim,
+                "epochs_trained": self.epochs,
+                "final_training_loss": self.train_losses[-1] if self.train_losses else 0,
+            },
+            "summary_statistics": {
+                "mean_anomaly_score": float(np.mean(final_scores)),
+                "std_anomaly_score": float(np.std(final_scores)),
+                "max_anomaly_score": float(np.max(final_scores)),
+                "min_anomaly_score": float(np.min(final_scores)),
+            },
+        }
 
-    def _generate_anomaly_explanation(self, node_info: Dict, anomaly_score: float,
-                                    embedding: np.ndarray) -> str:
-        """
-        Generate human-readable explanation for why a node was flagged as anomalous
-        """
-        explanations = []
-
-        node_type = node_info.get("type", "unknown")
+    def _generate_anomaly_explanation(self, info: Dict, anomaly_score: float) -> str:
+        """Human-readable reasons. Amounts are stored in KShM (constituency/flags) and KShB (revenue)."""
+        reasons = []
+        node_type = info.get("type", "unknown")
 
         if node_type == "constituency_year":
-            constituency = node_info.get("constituency", "Unknown")
-            year = node_info.get("fiscal_year", "Unknown")
+            label = f"{info.get('constituency', 'Unknown')} {info.get('fiscal_year', '')}".strip()
+            total_alloc = info.get("total_allocation_kshm", 0)
+            findings = info.get("num_audit_findings", 0)
+            misap = info.get("misappropriation_count", 0)
+            flagged = info.get("amount_flagged_kshm", 0)
 
-            # Check financial anomalies
-            total_alloc = node_info.get("total_allocation", 0)
-            if total_alloc > 500_000_000:  # Over 500M KSH
-                explanations.append(f"Unusually high total allocation: {total_alloc:,.0f} KSH")
-
-            # Check audit anomalies
-            num_findings = node_info.get("num_audit_findings", 0)
-            misap_count = node_info.get("misappropriation_count", 0)
-            if num_findings > 5:
-                explanations.append(f"High number of audit findings: {num_findings}")
-            if misap_count > 2:
-                explanations.append(f"Multiple misappropriation findings: {misap_count}")
-
-            misap_amount = node_info.get("misappropriation_amount", 0)
-            if misap_amount > 50_000_000:  # Over 50M KSH
-                explanations.append(f"Large amount flagged in misappropriations: {misap_amount:,.0f} KSH")
-
-            # Check for unusual patterns
-            if num_findings > 0 and total_alloc < 100_000_000:  # Low allocation but many findings
-                explanations.append("Disproportionate audit findings relative to allocation size")
+            if total_alloc > 500:
+                reasons.append(f"Unusually high allocation: KSh {total_alloc:,.1f}M")
+            if findings > 5:
+                reasons.append(f"High number of audit findings: {findings}")
+            if misap > 2:
+                reasons.append(f"Multiple misappropriation findings: {misap}")
+            if flagged > 50:
+                reasons.append(f"Large amount at risk: KSh {flagged:,.1f}M")
+            if findings > 0 and total_alloc < 100:
+                reasons.append("Disproportionate audit findings relative to allocation size")
+            prefix = label
 
         elif node_type == "governor_year":
-            governor = node_info.get("governor_name", "Unknown")
-            year = node_info.get("fiscal_year", "Unknown")
+            prefix = f"County {info.get('fiscal_year', '')}".strip()
+            revenue = info.get("total_revenue_kshb", 0)
+            findings = info.get("num_audit_findings", 0)
+            flagged = info.get("amount_flagged_kshm", 0)
 
-            total_rev = node_info.get("total_revenue", 0)
-            if total_rev > 10_000_000_000:  # Over 10B KSH
-                explanations.append(f"Unusually high total revenue: {total_rev:,.0f} KSH")
-
-            num_findings = node_info.get("num_audit_findings", 0)
-            if num_findings > 10:
-                explanations.append(f"High number of county-wide audit findings: {num_findings}")
-
-            misap_amount = node_info.get("misappropriation_amount", 0)
-            if misap_amount > 100_000_000:  # Over 100M KSH
-                explanations.append(f"Large county-wide misappropriation amount: {misap_amount:,.0f} KSH")
-
-        # Default explanation if no specific triggers
-        if not explanations:
-            explanations.append(f"Anomalous embedding pattern detected (score: {anomaly_score:.3f})")
-
-        return "; ".join(explanations)
-
-    def save_model(self, filepath: str):
-        """Save the trained model to disk"""
-        if self.is_trained:
-            torch.save({
-                'model_state_dict': self.model.state_dict(),
-                'optimizer_state_dict': self.optimizer.state_dict(),
-                'input_dim': self.input_dim,
-                'hidden_dim': self.hidden_dim,
-                'embedding_dim': self.embedding_dim,
-                'feature_scaler': self.feature_scaler,
-                'node_mapping': self.node_mapping,
-                'train_losses': self.train_losses
-            }, filepath)
-            logger.info(f"Model saved to {filepath}")
+            if revenue > 10:
+                reasons.append(f"Unusually high total revenue: KSh {revenue:,.1f}B")
+            if findings > 10:
+                reasons.append(f"High number of county audit findings: {findings}")
+            if flagged > 100:
+                reasons.append(f"Large amount flagged: KSh {flagged:,.1f}M")
         else:
+            prefix = "Node"
+
+        if not reasons:
+            reasons.append(f"Unusual embedding pattern relative to peers (score {anomaly_score:.3f})")
+        return f"{prefix}: " + "; ".join(reasons)
+
+    # ------------------------------------------------------------------
+    # Persistence (so a Flask restart doesn't wipe the trained model)
+    # ------------------------------------------------------------------
+    def save_model(self, filepath: str = MODEL_PATH) -> bool:
+        if not self.is_trained:
             logger.warning("Cannot save model: model not trained yet")
+            return False
 
-    def load_model(self, filepath: str):
-        """Load a trained model from disk"""
-        if os.path.exists(filepath):
-            checkpoint = torch.load(filepath)
-            self.input_dim = checkpoint['input_dim']
-            self.hidden_dim = checkpoint['hidden_dim']
-            self.embedding_dim = checkpoint['embedding_dim']
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        scaler = self.feature_scaler
+        torch.save(
+            {
+                "model_state_dict": self.model.state_dict(),
+                "input_dim": self.input_dim,
+                "hidden_dim": self.hidden_dim,
+                "embedding_dim": self.embedding_dim,
+                "epochs": self.epochs,
+                "scaler_mean": scaler.mean_.tolist(),
+                "scaler_scale": scaler.scale_.tolist(),
+                "scaler_var": scaler.var_.tolist(),
+                "node_mapping": {int(k): list(v) for k, v in self.node_mapping.items()},
+                "train_losses": self.train_losses,
+                "trained_at": self.trained_at,
+                "num_nodes": self.num_nodes,
+                "num_edges": self.num_edges,
+                "val_auc": self.val_auc,
+                "training_history": self.training_history,
+            },
+            filepath,
+        )
+        logger.info(f"Model saved to {filepath}")
+        return True
 
-            # Reinitialize model
-            self.encoder = VariationalGCNEncoder(self.input_dim, self.embedding_dim)
-            self.decoder = InnerProductDecoder()
-            self.model = VGAE(self.encoder, self.decoder)
+    def load_model(self, filepath: str = MODEL_PATH) -> bool:
+        if not os.path.exists(filepath):
+            return False
 
-            self.model.load_state_dict(checkpoint['model_state_dict'])
-            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            self.feature_scaler = checkpoint['feature_scaler']
-            self.node_mapping = checkpoint['node_mapping']
-            self.train_losses = checkpoint['train_losses']
-            self.is_trained = True
+        try:
+            ckpt = torch.load(filepath, map_location="cpu", weights_only=True)
+        except TypeError:  # older torch without weights_only
+            ckpt = torch.load(filepath, map_location="cpu")
 
-            logger.info(f"Model loaded from {filepath}")
-        else:
-            logger.error(f"Model file not found: {filepath}")
+        self.input_dim = ckpt["input_dim"]
+        self.hidden_dim = ckpt["hidden_dim"]
+        self.embedding_dim = ckpt["embedding_dim"]
+        self.epochs = ckpt.get("epochs", self.epochs)
+        self._build_model()
+        self.model.load_state_dict(ckpt["model_state_dict"])
 
-# Global model instance for reuse
+        scaler = StandardScaler()
+        scaler.mean_ = np.array(ckpt["scaler_mean"])
+        scaler.scale_ = np.array(ckpt["scaler_scale"])
+        scaler.var_ = np.array(ckpt["scaler_var"])
+        scaler.n_features_in_ = len(scaler.mean_)
+        scaler.n_samples_seen_ = 1
+        self.feature_scaler = scaler
+
+        self.node_mapping = {int(k): tuple(v) for k, v in ckpt.get("node_mapping", {}).items()}
+        self.reverse_mapping = {v: k for k, v in self.node_mapping.items()}
+        self.train_losses = ckpt.get("train_losses", [])
+        self.trained_at = ckpt.get("trained_at")
+        self.num_nodes = ckpt.get("num_nodes", 0)
+        self.num_edges = ckpt.get("num_edges", 0)
+        self.val_auc = ckpt.get("val_auc")
+        self.training_history = ckpt.get("training_history", [])
+        self.is_trained = True
+
+        logger.info(f"Model loaded from {filepath}")
+        return True
+
+
+# Global instance reused across requests
 gnn_detector = None
 
+
 def get_gnn_detector() -> GVAEAnomalyDetector:
-    """Get or create the global GNN detector instance"""
     global gnn_detector
     if gnn_detector is None:
         gnn_detector = GVAEAnomalyDetector()
+        try:
+            gnn_detector.load_model()
+        except Exception as e:
+            logger.warning(f"Could not load saved model: {e}")
     return gnn_detector

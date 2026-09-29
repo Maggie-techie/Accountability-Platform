@@ -1,140 +1,147 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip as RTooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { CheckCircle2, BrainCircuit, AlertTriangle } from 'lucide-react'
 import { Card, Badge } from '../../components/ui'
 import { KpiCard } from '../../components/Insights'
 import APIService from '../../services/api'
 
+const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+
+// The API wraps payloads as { success, data }. Unwrap safely.
+const unwrap = (json) => (json && typeof json === 'object' && 'data' in json ? json.data : json)
+
+// Always return an array, whatever shape the backend sends.
+const toArray = (value, ...keys) => {
+  if (Array.isArray(value)) return value
+  for (const key of keys) {
+    if (Array.isArray(value?.[key])) return value[key]
+  }
+  return []
+}
+
+const fmt = (n) => Number(n ?? 0).toLocaleString()
+
+// Count imports per weekday (Mon..Sun) from import history dates.
+const buildWeeklyImports = (imports) => {
+  const counts = Object.fromEntries(DAYS.map((d) => [d, 0]))
+  const now = new Date()
+  const weekAgo = new Date(now)
+  weekAgo.setDate(now.getDate() - 6)
+  weekAgo.setHours(0, 0, 0, 0)
+
+  imports.forEach((imp) => {
+    const raw = imp?.date ?? imp?.created_at
+    const d = raw ? new Date(raw) : null
+    if (!d || Number.isNaN(d.getTime()) || d < weekAgo || d > now) return
+    const label = DAYS[(d.getDay() + 6) % 7] // JS: Sunday = 0
+    counts[label] += 1
+  })
+
+  return DAYS.map((day) => ({ day, imports: counts[day] }))
+}
+
 export default function AdminDashboard() {
-  // State for dashboard data
   const [adminSummary, setAdminSummary] = useState(null)
   const [importHistory, setImportHistory] = useState([])
   const [anomaliesData, setAnomaliesData] = useState([])
-  const [weeklyImports, setWeeklyImports] = useState([])
+  const [weeklyImports, setWeeklyImports] = useState(DAYS.map((day) => ({ day, imports: 0 })))
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
+  const [error, setError] = useState(null) // fatal: summary failed
+  const [warnings, setWarnings] = useState([]) // non-fatal: partial failures
+  const [reloadKey, setReloadKey] = useState(0)
+
+  const retry = useCallback(() => setReloadKey((k) => k + 1), [])
 
   useEffect(() => {
-    const fetchDashboardData = async () => {
+    let cancelled = false
+
+    const token = localStorage.getItem('authToken')
+    const headers = { 'Content-Type': 'application/json' }
+    if (token) headers['Authorization'] = `Bearer ${token}`
+
+    const getJson = async (path) => {
+      const res = await fetch(`${APIService.baseURL}${path}`, { headers })
+      if (!res.ok) throw new Error(`${path} returned ${res.status}`)
+      return unwrap(await res.json())
+    }
+
+    const load = async () => {
+      setLoading(true)
+      setError(null)
+      const newWarnings = []
+
       try {
-        setLoading(true)
-        // Get auth token from localStorage
-        const token = localStorage.getItem('authToken')
-        const headers = {
-          'Content-Type': 'application/json'
-        }
-
-        if (token) {
-          headers['Authorization'] = `Bearer ${token}`
-        }
-
-        // Fetch all required data for the dashboard
-        const [
-          summaryRes,
-          importsRes,
-          anomaliesRes
-        ] = await Promise.all([
-          fetch(`${APIService.baseURL}/admin/summary`, { headers }),
-          fetch(`${APIService.baseURL}/admin/import-history`, { headers }),
-          fetch(`${APIService.baseURL}/anomalies`, { headers }) // General anomalies endpoint
+        // Summary is required; the rest are best-effort.
+        const [summaryResult, importsResult, anomaliesResult] = await Promise.allSettled([
+          getJson('/admin/summary'),
+          getJson('/admin/import-history'),
+          getJson('/anomalies'),
         ])
 
-        // Check if all responses are ok
-        if (!summaryRes.ok) throw new Error(`Failed to fetch summary: ${summaryRes.status}`)
-        if (!importsRes.ok) throw new Error(`Failed to fetch import history: ${importsRes.status}`)
-        if (!anomaliesRes.ok) {
-          // Anomalies endpoint might not exist, we'll try to get them from individual constituencies
-          console.warn('General anomalies endpoint not available, will try constituency-specific ones')
-          setAnomaliesData([]) // Will try to populate below
+        if (cancelled) return
+
+        if (summaryResult.status === 'rejected') {
+          throw new Error(`Failed to fetch summary: ${summaryResult.reason?.message ?? 'unknown error'}`)
+        }
+        const summary = summaryResult.value ?? {}
+
+        // Import history
+        let imports = []
+        if (importsResult.status === 'fulfilled') {
+          imports = toArray(importsResult.value, 'importHistory', 'imports', 'history')
         } else {
-          const anomaliesJson = await anomaliesRes.json()
-          setAnomaliesData(Array.isArray(anomaliesJson) ? anomaliesJson : anomaliesData.anomalies || [])
+          newWarnings.push('Import history is unavailable.')
+          console.warn('Import history failed:', importsResult.reason)
         }
 
-        // Process successful responses
-        const summaryJson = await summaryRes.json()
-        const importsJson = await importsRes.json()
+        // Anomalies: general endpoint first, then a constituency fallback
+        let anomalies = []
+        if (anomaliesResult.status === 'fulfilled') {
+          anomalies = toArray(anomaliesResult.value, 'anomalies')
+        }
 
-        setAdminSummary(summaryJson)
-        setImportHistory(Array.isArray(importsJson) ? importsJson : importsJson.importHistory || [])
-
-        // If we didn't get anomalies from the general endpoint, try to get them from constituencies
-        if (anomaliesData.length === 0) {
+        if (anomalies.length === 0) {
           try {
-            // Get a sample of constituencies to check for anomalies
-            const constituenciesRes = await fetch(`${APIService.baseURL}/constituency/`, { headers })
-            if (constituenciesRes.ok) {
-              const constituenciesJson = await constituenciesRes.json()
-              const constituencies = Array.isArray(constituenciesJson) ? constituenciesJson : constituenciesJson.constituencies || []
+            const constituencies = toArray(await getJson('/constituency/'), 'constituencies')
 
-              // Get anomalies for first few constituencies (to avoid too many requests)
-              const anomaliesPromises = constituencies
-                .slice(0, 5) // Limit to 5 constituencies
-                .map(c =>
-                  fetch(`${APIService.baseURL}/ai/mp/${c.slug}/anomalies`)
-                    .then(res => res.ok ? res.json() : { success: false, data: [] })
-                    .catch(() => ({ success: false, data: [] }))
-                )
-
-            const anomaliesResults = await Promise.all(anomaliesPromises)
-            const fetchedAnomalies = anomaliesResults
-              .filter(result => result.success)
-              .flatMap(result =>
-                Array.isArray(result.data) ? result.data :
-                result.data.anomalies ? result.data.anomalies : []
-              )
-
-            setAnomaliesData(fetchedAnomalies)
-          }
+            const results = await Promise.all(
+              constituencies.slice(0, 5).map((c) => {
+                const slug = c?.slug ?? c?.constituency_slug
+                if (!slug) return Promise.resolve([])
+                return getJson(`/ai/mp/${slug}/anomalies`)
+                  .then((data) => toArray(data, 'anomalies'))
+                  .catch(() => [])
+              })
+            )
+            anomalies = results.flat()
           } catch (err) {
             console.warn('Could not fetch anomalies from constituencies:', err)
-            // Keep empty anomalies array
+            newWarnings.push('Anomaly data is unavailable.')
           }
         }
 
-        // Process weekly imports data (if available from import history)
-        // For now, we'll use a placeholder or calculate from import history
-        // In a real implementation, this would come from a specific endpoint
-        const processedWeeklyImports = [
-          { day: 'Mon', imports: 1 }, { day: 'Tue', imports: 0 }, { day: 'Wed', imports: 2 },
-          { day: 'Thu', imports: 0 }, { day: 'Fri', imports: 1 }, { day: 'Sat', imports: 0 }, { day: 'Sun', imports: 0 }
-        ]
-        setWeeklyImports(processedWeeklyImports)
+        if (cancelled) return
 
-        setError(null)
+        setAdminSummary(summary)
+        setImportHistory(imports)
+        setAnomaliesData(anomalies)
+        setWeeklyImports(buildWeeklyImports(imports))
+        setWarnings(newWarnings)
       } catch (err) {
+        if (cancelled) return
         console.error('Error fetching dashboard data:', err)
         setError(`Failed to load dashboard data: ${err.message}`)
-        // Set some fallback data so the dashboard doesn't break completely
-        setAdminSummary({
-          totalLeaders: 7,
-          totalDatasets: 6,
-          totalRecords: 4213,
-          recentImports: 3,
-          validationStatus: 'Attention needed',
-          detectedAnomalies: 12,
-          modelStatus: 'Trained',
-          lastTrained: '2025-08-30'
-        })
-        setImportHistory([
-          { id: 'IMP-201', filename: 'Nyeri_Governor_Fiscal_2022_2027.xlsx', category: 'County Finance', status: 'Completed', records: 96, date: '2025-08-30' },
-          { id: 'IMP-200', filename: 'Nyeri_NGCDF_2022_2027.xlsx', category: 'NG-CDF Allocations', status: 'Completed', records: 24, date: '2025-08-30' },
-          { id: 'IMP-199', filename: 'dept_spending_q2.xlsx', category: 'Departmental Data', status: 'Failed - format error', records: 0, date: '2025-08-14' }
-        ])
-        setAnomaliesData([]) // Empty anomalies on error
-        setWeeklyImports([
-          { day: 'Mon', imports: 1 }, { day: 'Tue', imports: 0 }, { day: 'Wed', imports: 2 },
-          { day: 'Thu', imports: 0 }, { day: 'Fri', imports: 1 }, { day: 'Sat', imports: 0 }, { day: 'Sun', imports: 0 }
-        ])
       } finally {
-        setLoading(false)
+        if (!cancelled) setLoading(false)
       }
     }
 
-    fetchDashboardData()
-  }, [])
+    load()
+    return () => {
+      cancelled = true
+    }
+  }, [reloadKey])
 
-  // Handle loading and error states
   if (loading) {
     return (
       <div>
@@ -149,16 +156,13 @@ export default function AdminDashboard() {
       <div>
         <h1 className="text-2xl font-semibold mb-1">Admin dashboard</h1>
         <p className="text-ink-danger mb-6">{error}</p>
-        <div className="mt-4">
-          <button onClick={() => window.location.reload()} className="btn btn-outline">
-            Try again
-          </button>
-        </div>
+        <button onClick={retry} className="btn btn-outline">
+          Try again
+        </button>
       </div>
     )
   }
 
-  // If we still don't have summary data, show a basic message
   if (!adminSummary) {
     return (
       <div>
@@ -168,38 +172,69 @@ export default function AdminDashboard() {
     )
   }
 
-  // Calculate high-severity anomalies count
-  const highSeverityCount = anomaliesData.filter((a) => a.severity === 'High').length
+  // Derived values from the real API fields
+  const totalLeaders = (adminSummary.total_mps ?? 0) + (adminSummary.total_governors ?? 0)
+  const totalRecords = (adminSummary.total_allocations ?? 0) + (adminSummary.total_audit_findings ?? 0)
+
+  const highSeverityCount = anomaliesData.filter(
+    (a) => String(a?.severity ?? '').toLowerCase() === 'high'
+  ).length
+
+  const recentFindings = toArray(adminSummary.recent_findings)
+  const flaggedRecent = recentFindings.filter((f) => f?.finding_type === 'misappropriation').length
+
+  // Prefer backend values if they are ever added; otherwise derive or show a neutral default.
+  const validationStatus =
+    adminSummary.validation_status ??
+    adminSummary.validationStatus ??
+    (flaggedRecent > 0 ? 'Attention needed' : 'No issues flagged')
+  const modelStatus = adminSummary.model_status ?? adminSummary.modelStatus ?? 'Not connected'
+  const lastTrained = adminSummary.last_trained ?? adminSummary.lastTrained
 
   return (
     <div>
       <h1 className="text-2xl font-semibold mb-1">Admin dashboard</h1>
       <p className="text-ink-muted mb-6">System overview and recent activity.</p>
 
+      {warnings.length > 0 && (
+        <div className="mb-6 rounded border border-line bg-gold-50 px-4 py-3 text-sm text-ink">
+          {warnings.join(' ')}
+        </div>
+      )}
+
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <KpiCard label="Total leaders" value={adminSummary.totalLeaders} />
-        <KpiCard label="Datasets tracked" value={adminSummary.totalDatasets} />
-        <KpiCard label="Records in database" value={adminSummary.totalRecords.toLocaleString()} />
+        <KpiCard label="Total leaders" value={totalLeaders} />
+        <KpiCard label="Constituencies tracked" value={adminSummary.total_constituencies ?? 0} />
+        <KpiCard label="Records in database" value={fmt(totalRecords)} />
         <KpiCard label="Detected anomalies" value={highSeverityCount} changeTone="down" />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-6">
         <Card className="p-5 flex items-start gap-4">
-          <div className="h-10 w-10 rounded bg-forest-50 text-forest-700 flex items-center justify-center shrink-0"><CheckCircle2 size={18} /></div>
+          <div className="h-10 w-10 rounded bg-forest-50 text-forest-700 flex items-center justify-center shrink-0">
+            <CheckCircle2 size={18} />
+          </div>
           <div>
             <p className="text-sm text-ink-muted">Data validation status</p>
-            <p className="font-semibold text-ink">{adminSummary.validationStatus}</p>
+            <p className="font-semibold text-ink">{validationStatus}</p>
           </div>
         </Card>
         <Card className="p-5 flex items-start gap-4">
-          <div className="h-10 w-10 rounded bg-forest-50 text-forest-700 flex items-center justify-center shrink-0"><BrainCircuit size={18} /></div>
+          <div className="h-10 w-10 rounded bg-forest-50 text-forest-700 flex items-center justify-center shrink-0">
+            <BrainCircuit size={18} />
+          </div>
           <div>
             <p className="text-sm text-ink-muted">AI model status</p>
-            <p className="font-semibold text-ink">{adminSummary.modelStatus} &middot; last trained {adminSummary.lastTrained}</p>
+            <p className="font-semibold text-ink">
+              {modelStatus}
+              {lastTrained && <> &middot; last trained {lastTrained}</>}
+            </p>
           </div>
         </Card>
         <Card className="p-5 flex items-start gap-4">
-          <div className="h-10 w-10 rounded bg-gold-50 text-gold-500 flex items-center justify-center shrink-0"><AlertTriangle size={18} /></div>
+          <div className="h-10 w-10 rounded bg-gold-50 text-gold-500 flex items-center justify-center shrink-0">
+            <AlertTriangle size={18} />
+          </div>
           <div>
             <p className="text-sm text-ink-muted">High-severity anomalies</p>
             <p className="font-semibold text-ink">{highSeverityCount} need review</p>
@@ -210,37 +245,55 @@ export default function AdminDashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         <Card className="p-6 lg:col-span-2">
           <h3 className="font-serif font-semibold text-lg mb-4">Recent imports</h3>
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-ink-muted border-b border-line">
-                <th className="py-2 font-medium">File</th>
-                <th className="py-2 font-medium">Category</th>
-                <th className="py-2 font-medium">Records</th>
-                <th className="py-2 font-medium">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {importHistory.map((imp) => (
-                <tr key={imp.id} className="border-b border-line last:border-0">
-                  <td className="py-2.5 pr-2 text-ink">{imp.filename}</td>
-                  <td className="py-2.5 pr-2 text-ink-muted">{imp.category}</td>
-                  <td className="py-2.5 pr-2 text-ink-muted">{imp.records}</td>
-                  <td className="py-2.5">
-                    <Badge tone={imp.status.startsWith('Completed') ? 'good' : 'risk'}>{imp.status}</Badge>
-                  </td>
+          {importHistory.length === 0 ? (
+            <p className="text-sm text-ink-muted">No imports recorded yet.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-ink-muted border-b border-line">
+                  <th className="py-2 font-medium">File</th>
+                  <th className="py-2 font-medium">Category</th>
+                  <th className="py-2 font-medium">Records</th>
+                  <th className="py-2 font-medium">Status</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {importHistory.map((imp, i) => {
+                  const status = String(imp?.status ?? 'Unknown')
+                  return (
+                    <tr key={imp?.id ?? imp?._id ?? i} className="border-b border-line last:border-0">
+                      <td className="py-2.5 pr-2 text-ink">{imp?.filename ?? '—'}</td>
+                      <td className="py-2.5 pr-2 text-ink-muted">{imp?.category ?? '—'}</td>
+                      <td className="py-2.5 pr-2 text-ink-muted">{fmt(imp?.records)}</td>
+                      <td className="py-2.5">
+                        <Badge tone={status.startsWith('Completed') ? 'good' : 'risk'}>{status}</Badge>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
         </Card>
+
         <Card className="p-6">
           <h3 className="font-serif font-semibold text-lg mb-4">Imports this week</h3>
           <div className="h-48">
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={weeklyImports}>
                 <CartesianGrid stroke="#E2E5E1" vertical={false} />
-                <XAxis dataKey="day" tick={{ fontSize: 11, fill: '#5B6560' }} axisLine={{ stroke: '#E2E5E1' }} tickLine={false} />
-                <YAxis allowDecimals={false} tick={{ fontSize: 11, fill: '#5B6560' }} axisLine={false} tickLine={false} />
+                <XAxis
+                  dataKey="day"
+                  tick={{ fontSize: 11, fill: '#5B6560' }}
+                  axisLine={{ stroke: '#E2E5E1' }}
+                  tickLine={false}
+                />
+                <YAxis
+                  allowDecimals={false}
+                  tick={{ fontSize: 11, fill: '#5B6560' }}
+                  axisLine={false}
+                  tickLine={false}
+                />
                 <RTooltip contentStyle={{ fontSize: 12, borderRadius: 6, borderColor: '#E2E5E1' }} />
                 <Bar dataKey="imports" fill="#14532D" radius={[3, 3, 0, 0]} />
               </BarChart>
