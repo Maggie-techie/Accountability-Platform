@@ -430,7 +430,7 @@ export default function DatasetUpload() {
                   <Alert tone="good" title="Validation passed">
                     No issues found. You can proceed with the import.
                   </Alert>
-                )}
+                )
                 <div className="mt-6">
                   <h3 className="font-semibold text-lg mb-4">Validation Summary</h3>
                   <div className="grid grid-cols-2 gap-4 text-sm">
