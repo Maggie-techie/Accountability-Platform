@@ -5,6 +5,7 @@ import hashlib
 import json
 import logging
 import os
+import requests
 
 ai_bp = Blueprint("ai", __name__)
 
@@ -96,22 +97,117 @@ def get_cached_ai_response(prompt: str, model: str, parameters: dict) -> dict | 
 
 def call_claude_api(prompt: str, model: str = None) -> dict:
     """
-    Call Claude API to get analysis.
-    For now, this is a placeholder that returns mock data.
-    In production, this would integrate with the actual Claude API.
+    Call Grok API to get analysis.
+    Uses the Grok API key and model from environment.
     """
-    # TODO: Implement actual Claude API call
-    # For now, return structured mock data that matches expected format
-
-    # This is a mock implementation - replace with actual Claude API call
-    mock_response = {
-        "narrative_fields": {
-            "summary": "Mock analysis summary",
-            "details": "This is a placeholder response"
-        },
-        "chart_data": {
-            "sample_array": [1, 2, 3, 4, 5],
-            "sample_labels": ["A", "B", "C", "D", "E"]
+    # If model is not provided, use the default from environment
+    if model is None:
+        model = os.getenv("GROK_MODEL", "grok-beta")
+    
+    # Check if API key is set
+    api_key = os.getenv("GROK_API_KEY")
+    if not api_key:
+        logging.error("GROK_API_KEY not set in environment variables")
+        # Return a mock error response that matches the expected structure
+        return {
+            "narrative_fields": {
+                "summary": "Error: Grok API key not configured",
+                "details": "Please set the GROK_API_KEY environment variable"
+            },
+            "chart_data": {
+                "sample_array": [],
+                "sample_labels": []
+            }
+        }
+    
+    # Grok API endpoint
+    url = "https://api.x.ai/v1/chat/completions"
+    
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json"
+    }
+    
+    payload = {
+        "model": model,
+        "messages": [
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ],
+        "temperature": 0.7,
+        "max_tokens": 1000
+        # Note: Grok API might not support response format, so we rely on the prompt to return JSON
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        response.raise_for_status()  # Raise an exception for bad status codes
+        
+        result = response.json()
+        
+        # Extract the content from the first choice
+        if "choices" in result and len(result["choices"]) > 0:
+            message = result["choices"][0].get("message", {})
+            content = message.get("content", "")
+            
+            # Try to parse the content as JSON
+            try:
+                # The content might be a JSON string, or it might have extra text.
+                # We assume the prompt instructs the model to return ONLY a JSON object.
+                # We'll try to parse the entire content as JSON.
+                parsed = json.loads(content)
+                return parsed
+            except json.JSONDecodeError as e:
+                logging.error(f"Failed to parse Grok response as JSON: {e}")
+                logging.error(f"Response content: {content}")
+                # Return a fallback structure
+                return {
+                    "narrative_fields": {
+                        "summary": "Error: Failed to parse Grok response",
+                        "details": f"Groq API returned invalid JSON: {str(e)}"
+                    },
+                    "chart_data": {
+                        "sample_array": [],
+                        "sample_labels": []
+                    }
+                }
+        else:
+            logging.error("No choices in Grok API response")
+            return {
+                "narrative_fields": {
+                    "summary": "Error: Empty response from Grok API",
+                    "details": "The Grok API returned no choices"
+                },
+                "chart_data": {
+                    "sample_array": [],
+                    "sample_labels": []
+                }
+            }
+    except requests.exceptions.RequestException as e:
+        logging.error(f"Request to Grok API failed: {e}")
+        return {
+            "narrative_fields": {
+                "summary": "Error: Grok API request failed",
+                "details": f"Request error: {str(e)}"
+            },
+            "chart_data": {
+                "sample_array": [],
+                "sample_labels": []
+            }
+        }
+    except Exception as e:
+        logging.error(f"Unexpected error in call_claude_api: {e}")
+        return {
+            "narrative_fields": {
+                "summary": "Error: Internal error in AI service",
+                "details": f"Unexpected error: {str(e)}"
+            },
+            "chart_data": {
+                "sample_array": [],
+                "sample_labels": []
+            }
         }
     }
 
