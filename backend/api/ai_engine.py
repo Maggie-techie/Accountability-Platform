@@ -11,6 +11,8 @@ ai_bp = Blueprint("ai", __name__)
 
 # AI Cache configuration
 AI_CACHE_TTL_HOURS = int(os.getenv("AI_CACHE_TTL_HOURS", "24"))
+GROK_API_KEY = os.getenv("GROK_API_KEY")
+GROK_MODEL = os.getenv("GROK_MODEL", "grok-beta")
 
 def get_ai_cache_collection():
     """Get or create the AI cache collection, reusing the connection."""
@@ -211,7 +213,6 @@ def call_claude_api(prompt: str, model: str = None) -> dict:
         }
     }
 
-    return mock_response
 
 def validate_and_extract_data(constituency_slug: str = None) -> dict:
     """
