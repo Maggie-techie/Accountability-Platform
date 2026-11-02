@@ -211,7 +211,6 @@ def call_claude_api(prompt: str, model: str = None) -> dict:
                 "sample_labels": []
             }
         }
-    }
 
 
 def validate_and_extract_data(constituency_slug: str = None) -> dict:
