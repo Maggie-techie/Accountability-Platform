@@ -65,7 +65,7 @@ def create_app() -> Flask:
     def health():
         mongodb_uri = os.getenv("MONGODB_URI", "MONGO_URI")
         mongodb_db = os.getenv("MONGODB_DB", "not_set")
-        return jsonify({"status": "ok", "service": "Accountability"})
+        return jsonify({ "status": "ok", "service": "Accountability"})
 
 
     return app
