@@ -1,21 +1,112 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { NavLink, Outlet, Link } from 'react-router-dom'
-import { Menu, X, Landmark, Shield } from 'lucide-react'
+import { Menu, X, Landmark, Shield, ChevronDown, Users, Building2, FileText, Cpu, Sparkles } from 'lucide-react'
 
-const navItems = [
-  { to: '/', label: 'Home' },
-  { to: '/leaders', label: 'Leaders' },
-  { to: '/county', label: 'County' },
-  { to: '/constituencies', label: 'Constituencies' },
-  { to: '/accountability', label: 'Accountability' },
-  { to: '/anomalies', label: 'Anomalies' },
-  { to: '/reports', label: 'Reports' },
-  { to: '/assistant', label: 'AI Assistant' },
-  { to: '/about', label: 'About' },
+// Navigation structure with dropdown groups
+const navGroups = [
+  {
+    label: 'Leaders',
+    icon: Users,
+    items: [
+      { to: '/leaders', label: 'All Leaders' },
+      { to: '/county', label: 'County Government' },
+      { to: '/constituencies', label: 'Constituencies' },
+    ],
+  },
+  {
+    label: 'Analysis',
+    icon: FileText,
+    items: [
+      { to: '/accountability', label: 'Accountability Dashboard' },
+      { to: '/anomalies', label: 'Anomalies' },
+      { to: '/reports', label: 'Reports' },
+    ],
+  },
+  {
+    label: 'Tools',
+    icon: Cpu,
+    items: [
+      { to: '/assistant', label: 'AI Assistant' },
+      { to: '/about', label: 'About' },
+    ],
+  },
 ]
 
-export default function PublicLayout() {
+function Dropdown({ group, isMobile = false }) {
   const [open, setOpen] = useState(false)
+  const dropdownRef = useRef(null)
+
+  // Close dropdown when clicking outside (desktop only)
+  useEffect(() => {
+    if (!isMobile) {
+      const handleClickOutside = (e) => {
+        if (dropdownRef.current && !dropdownRef.current.contains(e.target)) {
+          setOpen(false)
+        }
+      }
+      document.addEventListener('mousedown', handleClickOutside)
+      return () => document.removeEventListener('mousedown', handleClickOutside)
+    }
+  }, [isMobile])
+
+  if (group.isSingle) {
+    return (
+      <NavLink
+        to={group.to}
+        end={group.to === '/'}
+        className={({ isActive }) =>
+          `px-3 py-2 rounded text-sm font-medium transition-colors ${
+            isActive ? 'text-forest-700 bg-forest-50/30' : 'text-white/60 hover:text-white'
+          }`
+        }
+      >
+        {group.label}
+      </NavLink>
+    )
+  }
+
+  const Icon = group.icon
+
+  return (
+    <div ref={dropdownRef} className="relative" onMouseEnter={() => !isMobile && setOpen(true)} onMouseLeave={() => !isMobile && setOpen(false)}>
+      <button
+        onClick={() => setOpen(!open)}
+        className={`flex items-center gap-1.5 px-3 py-2 rounded text-sm font-medium transition-colors ${
+          isMobile ? 'w-full text-left text-white/60 hover:text-white' : 'text-white/60 hover:text-white'
+        }`}
+        aria-haspopup="true"
+        aria-expanded={open}
+      >
+        <Icon size={14} className="text-white/60" />
+        {group.label}
+        <ChevronDown size={12} className={`text-white/60 transition-transform ${open ? 'rotate-180' : ''}`} />
+      </button>
+
+      {open && (
+        <div className={`absolute top-full left-0 mt-1 min-w-[180px] rounded-lg bg-ink border border-line/50 shadow-lg py-1 z-40 ${isMobile ? 'static w-full bg-ink/50 border-t border-line/50 shadow-none mt-0' : ''}`}>
+          {group.items.map((item) => (
+            <NavLink
+              key={item.to}
+              to={item.to}
+              onClick={() => setOpen(false)}
+              className={({ isActive }) =>
+                `block px-4 py-2.5 text-sm transition-colors ${
+                  isActive ? 'text-forest-700 bg-forest-50/30' : 'text-white/60 hover:text-white hover:bg-white/5'
+                }${isMobile ? ' rounded-none' : ''}`
+              }
+            >
+              {item.label}
+            </NavLink>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default function PublicLayout() {
+  const [mobileOpen, setMobileOpen] = useState(false)
+
   return (
     <div className="min-h-screen flex flex-col">
       <header className="sticky top-0 z-30 bg-ink backdrop-blur border-b border-line/50">
@@ -29,20 +120,10 @@ export default function PublicLayout() {
             </span>
           </Link>
 
+          {/* Desktop Navigation */}
           <nav className="hidden lg:flex items-center gap-1">
-            {navItems.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.to === '/'}
-                className={({ isActive }) =>
-                  `px-3 py-2 rounded text-sm font-medium transition-colors ${
-                    isActive ? 'text-forest-700 bg-forest-50/30' : 'text-white/60 hover:text-white'
-                  }`
-                }
-              >
-                {item.label}
-              </NavLink>
+            {navGroups.map((group) => (
+              <Dropdown key={group.label} group={group} isMobile={false} />
             ))}
           </nav>
 
@@ -52,25 +133,21 @@ export default function PublicLayout() {
             </Link>
           </div>
 
-          <button className="lg:hidden p-2 text-white/60" onClick={() => setOpen(!open)} aria-label="Toggle menu">
-            {open ? <X size={22} /> : <Menu size={22} />}
+          {/* Mobile Menu Button */}
+          <button className="lg:hidden p-2 text-white/60" onClick={() => setMobileOpen(!mobileOpen)} aria-label="Toggle menu">
+            {mobileOpen ? <X size={22} /> : <Menu size={22} />}
           </button>
         </div>
 
-        {open && (
+        {/* Mobile Navigation */}
+        {mobileOpen && (
           <nav className="lg:hidden border-t border-line/50 bg-ink/50 px-4 py-3 flex flex-col gap-1">
-            {navItems.map((item) => (
-              <NavLink
-                key={item.to}
-                to={item.to}
-                end={item.to === '/'}
-                onClick={() => setOpen(false)}
-                className={({ isActive }) =>
-                  `px-3 py-2.5 rounded text-sm font-medium ${isActive ? 'text-forest-700 bg-forest-50/30' : 'text-white/60'}`
-                }
-              >
-                {item.label}
-              </NavLink>
+            {navGroups.map((group) => (
+              <Dropdown
+                key={group.label}
+                group={group}
+                isMobile={true}
+              />
             ))}
             <Link to="/admin/login" className="px-3 py-2.5 text-sm text-white/60 flex items-center gap-1.5">
               <Shield size={14} /> Admin
