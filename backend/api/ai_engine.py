@@ -515,9 +515,17 @@ def mp_anomalies(constituency_slug):
 
         # Fetch GNN-detected anomalies for this constituency from database
         db = get_db()
-        gnn_anomalies = list(db.gnn_anomalies.find({"constituency_slug": constituency_slug}))
+        gnn_anomalies = list(db.gnn_anomalies.find({"metadata.constituency_slug": constituency_slug}))
         for a in gnn_anomalies:
             a["_id"] = str(a["_id"])
+
+        # Fetch high-severity audit findings (misappropriations) for this constituency
+        high_severity_findings = list(db.audit_findings.find({
+            "constituency_slug": constituency_slug,
+            "finding_type": "misappropriation"
+        }))
+        for f in high_severity_findings:
+            f["_id"] = str(f["_id"])
 
         # Build GNN context for LLM
         gnn_context = ""
@@ -540,16 +548,30 @@ def mp_anomalies(constituency_slug):
         else:
             gnn_context = "\n\nNo GNN-detected anomalies found for this constituency. The GNN model may not have been trained yet, or no anomalies were detected."
 
+        # Add high-severity audit findings context
+        audit_context = ""
+        if high_severity_findings:
+            audit_context = "\n\nHIGH-SEVERITY AUDIT FINDINGS (Misappropriations from Auditor-General reports):\n"
+            for finding in high_severity_findings:
+                audit_context += f"- {finding.get('note') or finding.get('finding', 'Misappropriation found')}"
+                audit_context += f" [FY: {finding.get('fy_reviewed', 'Unknown')}]"
+                if finding.get('amount_at_risk'):
+                    audit_context += f" Amount at risk: {finding['amount_at_risk']}"
+                audit_context += "\n"
+        else:
+            audit_context = "\n\nNo high-severity audit findings (misappropriations) found for this constituency in the current dataset."
+
         # Prepare prompt for Claude with GNN context
         prompt = f"""
-        You are a financial analyst explaining anomalies detected by a Graph Neural Network (GNN) model for the constituency '{constituency_slug}'.
+        You are a financial analyst explaining anomalies and audit findings for the constituency '{constituency_slug}'.
 
-        The GNN model analyzes constituency-year and governor-year nodes in a financial graph, detecting anomalies via:
+        The Graph Neural Network (GNN) model analyzes constituency-year and governor-year nodes in a financial graph, detecting anomalies via:
         1. Graph reconstruction error (connectivity patterns)
         2. Embedding space distance to k-nearest neighbors
         3. Isolation Forest on node embeddings
 
         {gnn_context}
+        {audit_context}
 
         Constituency Data: {json.dumps(data.get('constituency', {}), default=str)}
         Governor Data: {json.dumps(data.get('governor', {}), default=str)}
@@ -557,8 +579,8 @@ def mp_anomalies(constituency_slug):
         Return ONLY a JSON object with exactly this structure:
         {{
           "narrative_fields": {{
-            "summary": "string (plain-language summary of GNN-detected anomalies for citizens)",
-            "details": "string (detailed explanation of what the GNN found, why it matters, and recommended actions)"
+            "summary": "string (plain-language summary of GNN anomalies AND high-severity audit findings for citizens)",
+            "details": "string (detailed explanation combining GNN findings and audit misappropriations, why they matter, and recommended actions)"
           }},
           "chart_data": {{
             "anomaly_points": [{{"fy": "string", "metric": "string", "value": number, "expected": number}}],
@@ -566,7 +588,8 @@ def mp_anomalies(constituency_slug):
           }}
         }}
 
-        For anomaly_points, extract data from the GNN anomalies above. Each GNN anomaly typically represents a constituency-fiscal_year node.
+        For anomaly_points, extract data from BOTH GNN anomalies and high-severity audit findings above.
+        Include audit misappropriations as anomaly points with metric "Audit Misappropriation".
         For normal_range, provide typical ranges for the metrics based on the constituency's historical data.
         """
 
