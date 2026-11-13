@@ -11,8 +11,8 @@ ai_bp = Blueprint("ai", __name__)
 
 # AI Cache configuration
 AI_CACHE_TTL_HOURS = int(os.getenv("AI_CACHE_TTL_HOURS", "24"))
-GROK_API_KEY = os.getenv("GROK_API_KEY")
-GROK_MODEL = os.getenv("GROK_MODEL", "grok-beta")
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 
 def get_ai_cache_collection():
     """Get or create the AI cache collection, reusing the connection."""
@@ -99,37 +99,37 @@ def get_cached_ai_response(prompt: str, model: str, parameters: dict) -> dict | 
 
 def call_claude_api(prompt: str, model: str = None) -> dict:
     """
-    Call Grok API to get analysis.
-    Uses the Grok API key and model from environment.
+    Call Groq API to get analysis.
+    Uses the Groq API key and model from environment.
     """
     # If model is not provided, use the default from environment
     if model is None:
-        model = os.getenv("GROK_MODEL", "grok-beta")
-    
+        model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+
     # Check if API key is set
-    api_key = os.getenv("GROK_API_KEY")
+    api_key = os.getenv("GROQ_API_KEY")
     if not api_key:
-        logging.error("GROK_API_KEY not set in environment variables")
+        logging.error("GROQ_API_KEY not set in environment variables")
         # Return a mock error response that matches the expected structure
         return {
             "narrative_fields": {
-                "summary": "Error: Grok API key not configured",
-                "details": "Please set the GROK_API_KEY environment variable"
+                "summary": "Error: Groq API key not configured",
+                "details": "Please set the GROQ_API_KEY environment variable"
             },
             "chart_data": {
                 "sample_array": [],
                 "sample_labels": []
             }
         }
-    
-    # Grok API endpoint
-    url = "https://api.x.ai/v1/chat/completions"
-    
+
+    # Groq API endpoint
+    url = "https://api.groq.com/openai/v1/chat/completions"
+
     headers = {
         "Authorization": f"Bearer {api_key}",
         "Content-Type": "application/json"
     }
-    
+
     payload = {
         "model": model,
         "messages": [
@@ -139,21 +139,21 @@ def call_claude_api(prompt: str, model: str = None) -> dict:
             }
         ],
         "temperature": 0.7,
-        "max_tokens": 1000
-        # Note: Grok API might not support response format, so we rely on the prompt to return JSON
+        "max_tokens": 2000,
+        "response_format": {"type": "json_object"}
     }
-    
+
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=30)
+        response = requests.post(url, headers=headers, json=payload, timeout=60)
         response.raise_for_status()  # Raise an exception for bad status codes
-        
+
         result = response.json()
-        
+
         # Extract the content from the first choice
         if "choices" in result and len(result["choices"]) > 0:
             message = result["choices"][0].get("message", {})
             content = message.get("content", "")
-            
+
             # Try to parse the content as JSON
             try:
                 # The content might be a JSON string, or it might have extra text.
@@ -162,12 +162,12 @@ def call_claude_api(prompt: str, model: str = None) -> dict:
                 parsed = json.loads(content)
                 return parsed
             except json.JSONDecodeError as e:
-                logging.error(f"Failed to parse Grok response as JSON: {e}")
+                logging.error(f"Failed to parse Groq response as JSON: {e}")
                 logging.error(f"Response content: {content}")
                 # Return a fallback structure
                 return {
                     "narrative_fields": {
-                        "summary": "Error: Failed to parse Grok response",
+                        "summary": "Error: Failed to parse Groq response",
                         "details": f"Groq API returned invalid JSON: {str(e)}"
                     },
                     "chart_data": {
@@ -176,11 +176,11 @@ def call_claude_api(prompt: str, model: str = None) -> dict:
                     }
                 }
         else:
-            logging.error("No choices in Grok API response")
+            logging.error("No choices in Groq API response")
             return {
                 "narrative_fields": {
-                    "summary": "Error: Empty response from Grok API",
-                    "details": "The Grok API returned no choices"
+                    "summary": "Error: Empty response from Groq API",
+                    "details": "The Groq API returned no choices"
                 },
                 "chart_data": {
                     "sample_array": [],
@@ -188,10 +188,10 @@ def call_claude_api(prompt: str, model: str = None) -> dict:
                 }
             }
     except requests.exceptions.RequestException as e:
-        logging.error(f"Request to Grok API failed: {e}")
+        logging.error(f"Request to Groq API failed: {e}")
         return {
             "narrative_fields": {
-                "summary": "Error: Grok API request failed",
+                "summary": "Error: Groq API request failed",
                 "details": f"Request error: {str(e)}"
             },
             "chart_data": {
