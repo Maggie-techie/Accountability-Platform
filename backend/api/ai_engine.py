@@ -489,7 +489,8 @@ def mp_summary(constituency_slug):
 
 @ai_bp.route("/mp/<constituency_slug>/anomalies", methods=["GET"])
 def mp_anomalies(constituency_slug):
-    """AI Anomalies Detector Module for MP/Constituency"""
+    """AI Anomalies Detector Module for MP/Constituency.
+    Uses GNN-detected anomalies as context for LLM explanations."""
     try:
         # Check cache first
         cache_parameters = {"constituency_slug": constituency_slug, "module": "anomalies"}
@@ -512,10 +513,43 @@ def mp_anomalies(constituency_slug):
         if "error" in data:
             return jsonify({"error": data["error"]}), 404
 
-        # Prepare prompt for Claude
+        # Fetch GNN-detected anomalies for this constituency from database
+        db = get_db()
+        gnn_anomalies = list(db.gnn_anomalies.find({"constituency_slug": constituency_slug}))
+        for a in gnn_anomalies:
+            a["_id"] = str(a["_id"])
+
+        # Build GNN context for LLM
+        gnn_context = ""
+        if gnn_anomalies:
+            gnn_context = "\n\nGNN MODEL DETECTED ANOMALIES (use as primary context):\n"
+            for anomaly in gnn_anomalies:
+                gnn_context += f"- {anomaly.get('explanation', 'Anomaly detected')}"
+                gnn_context += f" (Score: {anomaly.get('anomaly_score', 0):.2f}, Rank: {anomaly.get('anomaly_rank', 'N/A')})"
+                metadata = anomaly.get('metadata', {})
+                gnn_context += f" [FY: {metadata.get('fiscal_year', 'Unknown')}]\n"
+                features = anomaly.get('features', {})
+                financial = features.get('financial', {})
+                audit = features.get('audit', {})
+                if financial.get('total_allocation_kshm'):
+                    gnn_context += f"  Total Allocation: KSh {financial['total_allocation_kshm']:,.1f}M\n"
+                if audit.get('num_findings'):
+                    gnn_context += f"  Audit Findings: {audit['num_findings']} (Misappropriations: {audit.get('misappropriation_count', 0)})\n"
+                if audit.get('amount_flagged_kshm'):
+                    gnn_context += f"  Amount Flagged: KSh {audit['amount_flagged_kshm']:,.1f}M\n"
+        else:
+            gnn_context = "\n\nNo GNN-detected anomalies found for this constituency. The GNN model may not have been trained yet, or no anomalies were detected."
+
+        # Prepare prompt for Claude with GNN context
         prompt = f"""
-        Detect anomalies in the financial and audit data for the constituency with slug '{constituency_slug}'.
-        Based on the following data, identify any anomalies:
+        You are a financial analyst explaining anomalies detected by a Graph Neural Network (GNN) model for the constituency '{constituency_slug}'.
+
+        The GNN model analyzes constituency-year and governor-year nodes in a financial graph, detecting anomalies via:
+        1. Graph reconstruction error (connectivity patterns)
+        2. Embedding space distance to k-nearest neighbors
+        3. Isolation Forest on node embeddings
+
+        {gnn_context}
 
         Constituency Data: {json.dumps(data.get('constituency', {}), default=str)}
         Governor Data: {json.dumps(data.get('governor', {}), default=str)}
@@ -523,17 +557,20 @@ def mp_anomalies(constituency_slug):
         Return ONLY a JSON object with exactly this structure:
         {{
           "narrative_fields": {{
-            "summary": "string (description of anomalies found)",
-            "details": "string (additional details about the anomalies)"
+            "summary": "string (plain-language summary of GNN-detected anomalies for citizens)",
+            "details": "string (detailed explanation of what the GNN found, why it matters, and recommended actions)"
           }},
           "chart_data": {{
             "anomaly_points": [{{"fy": "string", "metric": "string", "value": number, "expected": number}}],
             "normal_range": [{{"fy": "string", "min": number, "max": number}}]
           }}
         }}
+
+        For anomaly_points, extract data from the GNN anomalies above. Each GNN anomaly typically represents a constituency-fiscal_year node.
+        For normal_range, provide typical ranges for the metrics based on the constituency's historical data.
         """
 
-        # Call Claude API (mock for now)
+        # Call Claude API
         ai_response = call_claude_api(prompt)
 
         # Cache the response

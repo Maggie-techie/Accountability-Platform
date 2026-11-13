@@ -9,7 +9,7 @@ import APIService from '../services/api'
 // Turns raw anomaly points from one constituency's AI module response into
 // discrete table/card rows. chart_data.anomaly_points is documented as:
 // [{ fy: string, metric: string, value: number, expected: number }]
-function pointsToRows(constituency, aiData) {
+function pointsToRows(constituency, aiData, source = 'ai') {
   const points = aiData?.chart_data?.anomaly_points || []
   const summary = aiData?.narrative_fields?.summary || aiData?.narrative_fields?.details || ''
 
@@ -18,7 +18,7 @@ function pointsToRows(constituency, aiData) {
     const severity = deviation > 0.5 ? 'High' : deviation > 0.2 ? 'Medium' : 'Low'
 
     return {
-      id: `${constituency.slug}-${point.fy || 'unknown'}-${i}`,
+      id: `${source}-${constituency.slug}-${point.fy || 'unknown'}-${i}`,
       title: point.metric || 'Flagged deviation',
       entity: constituency.name,
       category: point.metric || 'Uncategorized',
@@ -26,6 +26,7 @@ function pointsToRows(constituency, aiData) {
       severity,
       status: 'Flagged',
       summary,
+      source,
     }
   })
 }
@@ -35,6 +36,7 @@ export default function Anomalies() {
   const [fy, setFy] = useState('')
   const [category, setCategory] = useState('')
   const [status, setStatus] = useState('')
+  const [source, setSource] = useState('')
   const [view, setView] = useState('table')
 
   // State for data fetching
@@ -52,12 +54,26 @@ export default function Anomalies() {
 
         const results = await Promise.all(
           constituencies.map(async (c) => {
+            // Try GNN endpoint first (new trained model)
+            try {
+              const gnnRes = await fetch(`${APIService.baseURL}/anomalies/gnn/constituency/${c.slug}`)
+              if (gnnRes.ok) {
+                const gnnJson = await gnnRes.json()
+                if (gnnJson?.success && gnnJson.data) {
+                  return pointsToRows(c, gnnJson.data, 'gnn')
+                }
+              }
+            } catch (err) {
+              console.debug(`GNN endpoint not available for ${c.slug}:`, err.message)
+            }
+
+            // Fall back to AI engine endpoint (Grok/Claude)
             try {
               const res = await fetch(`${APIService.baseURL}/ai/mp/${c.slug}/anomalies`)
               if (!res.ok) return []
               const json = await res.json()
               if (!json?.success || !json.data) return []
-              return pointsToRows(c, json.data)
+              return pointsToRows(c, json.data, 'ai')
             } catch (err) {
               console.warn(`Could not fetch anomalies for ${c.slug}:`, err)
               return []
@@ -84,8 +100,9 @@ export default function Anomalies() {
     (!severity || a.severity === severity) &&
     (!fy || a.financialYear === fy) &&
     (!category || a.category === category) &&
-    (!status || a.status === status)
-  ), [anomalies, severity, fy, category, status])
+    (!status || a.status === status) &&
+    (!source || a.source === source)
+  ), [anomalies, severity, fy, category, status, source])
 
   // Handle loading and error states
   if (loading) {
@@ -138,6 +155,7 @@ export default function Anomalies() {
         <Select label="Financial year" value={fy} onChange={setFy} options={[...new Set(filtered.map((a) => a.financialYear))]} />
         <Select label="Category" value={category} onChange={setCategory} options={[...new Set(filtered.map((a) => a.category))]} />
         <Select label="Status" value={status} onChange={setStatus} options={[...new Set(filtered.map((a) => a.status))]} />
+        <Select label="Source" value={source} onChange={setSource} options={['gnn', 'ai']} />
         <div className="ml-auto flex gap-1">
           <button onClick={() => setView('table')} className={`p-2 rounded ${view === 'table' ? 'bg-forest-50 text-forest-700' : 'text-ink-faint'}`}><List size={16} /></button>
           <button onClick={() => setView('cards')} className={`p-2 rounded ${view === 'cards' ? 'bg-forest-50 text-forest-700' : 'text-ink-faint'}`}><LayoutGrid size={16} /></button>
