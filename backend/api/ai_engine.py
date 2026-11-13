@@ -515,7 +515,7 @@ def mp_anomalies(constituency_slug):
 
         # Fetch GNN-detected anomalies for this constituency from database
         db = get_db()
-        gnn_anomalies = list(db.gnn_anomalies.find({"constituency_slug": constituency_slug}))
+        gnn_anomalies = list(db.gnn_anomalies.find({"metadata.constituency_slug": constituency_slug}))
         for a in gnn_anomalies:
             a["_id"] = str(a["_id"])
 
