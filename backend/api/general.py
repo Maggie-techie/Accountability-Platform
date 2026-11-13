@@ -389,35 +389,7 @@ def train_gnn_anomaly_model():
 
 @general_bp.route("/anomalies/gnn/detect", methods=["GET"])
 def detect_gnn_anomalies():
-    """Detect anomalies using the trained GNN model"""
-    if not GNN_AVAILABLE:
-        return jsonify({"error": "GNN anomaly detection is not available. Required dependencies are missing."}), 503
-
-    try:
-        db = get_db()
-        detector = get_gnn_detector()
-        result = detector.detect_anomalies(db)
-
-        if result["status"] == "success":
-            return jsonify({
-                "success": True,
-                "message": "GNN anomaly detection completed successfully",
-                "data": result,
-            }), 200
-
-        return jsonify({"error": "Failed to detect anomalies with GNN model", "details": result}), 500
-
-    except Exception as e:
-        logging.exception("Error in GNN anomaly detection")
-        return jsonify({"error": "Internal server error", "details": str(e)}), 500
-
-
-@general_bp.route("/anomalies/gnn/constituency/<constituency_slug>", methods=["GET"])
-def get_gnn_anomalies_by_constituency(constituency_slug):
-    """
-    Get GNN-detected anomalies for a specific constituency.
-    Returns data in the same format as the AI engine endpoint for compatibility.
-    """
+    """Detect anomalies using the trained GNN model and save to database"""
     if not GNN_AVAILABLE:
         return jsonify({"error": "GNN anomaly detection is not available. Required dependencies are missing."}), 503
 
@@ -429,103 +401,34 @@ def get_gnn_anomalies_by_constituency(constituency_slug):
         if result["status"] != "success":
             return jsonify({"error": "Failed to detect anomalies with GNN model", "details": result}), 500
 
-        # Filter anomalies for the requested constituency
-        constituency_anomalies = []
+        # Save anomalies to database for AI engine to use as context
+        anomalies_to_save = []
         for anomaly in result.get("anomalies", []):
-            metadata = anomaly.get("metadata", {})
-            if metadata.get("constituency_slug") == constituency_slug:
-                constituency_anomalies.append(anomaly)
+            # Add metadata for easier querying
+            doc = {
+                "detection_timestamp": result.get("timestamp"),
+                "model_version": f"GVAE-{detector.embedding_dim}d-{detector.epochs}ep",
+                "total_nodes_analyzed": result.get("total_nodes_analyzed"),
+                "anomaly_rate": result.get("anomaly_rate"),
+                **anomaly
+            }
+            anomalies_to_save.append(doc)
 
-        if not constituency_anomalies:
-            return jsonify({
-                "success": True,
-                "module": "anomalies",
-                "cached": False,
-                "data": {
-                    "narrative_fields": {
-                        "summary": f"No GNN-detected anomalies found for {constituency_slug}",
-                        "details": "The Graph Neural Network model did not flag any unusual patterns for this constituency."
-                    },
-                    "chart_data": {
-                        "anomaly_points": [],
-                        "normal_range": []
-                    }
-                }
-            }), 200
-
-        # Convert GNN anomalies to AI engine format (anomaly_points)
-        anomaly_points = []
-        for anomaly in constituency_anomalies:
-            metadata = anomaly.get("metadata", {})
-            features = anomaly.get("features", {})
-            financial = features.get("financial", {})
-            audit = features.get("audit", {})
-
-            # Create anomaly point entries for each metric that could be anomalous
-            fy = metadata.get("fiscal_year", "Unknown")
-
-            # Total allocation anomaly
-            total_alloc = financial.get("total_allocation_kshm", 0)
-            if total_alloc > 0:
-                anomaly_points.append({
-                    "fy": fy,
-                    "metric": "Total Allocation (KSh M)",
-                    "value": round(total_alloc, 1),
-                    "expected": round(total_alloc * 0.7, 1),  # Expected as 70% of actual (placeholder)
-                })
-
-            # Audit findings count anomaly
-            num_findings = audit.get("num_findings", 0)
-            if num_findings > 0:
-                anomaly_points.append({
-                    "fy": fy,
-                    "metric": "Audit Findings Count",
-                    "value": num_findings,
-                    "expected": 1,  # Expected baseline
-                })
-
-            # Misappropriation count anomaly
-            misap_count = audit.get("misappropriation_count", 0)
-            if misap_count > 0:
-                anomaly_points.append({
-                    "fy": fy,
-                    "metric": "Misappropriation Count",
-                    "value": misap_count,
-                    "expected": 0,
-                })
-
-            # Amount flagged anomaly
-            amount_flagged = audit.get("amount_flagged_kshm", 0)
-            if amount_flagged > 0:
-                anomaly_points.append({
-                    "fy": fy,
-                    "metric": "Amount Flagged (KSh M)",
-                    "value": round(amount_flagged, 1),
-                    "expected": 0,
-                })
-
-        # Generate summary from top anomaly explanations
-        explanations = [a.get("explanation", "") for a in constituency_anomalies[:3]]
-        summary = "; ".join(explanations) if explanations else f"GNN detected {len(constituency_anomalies)} anomaly(s) for this constituency."
+        if anomalies_to_save:
+            # Clear old anomalies and insert new ones
+            db.gnn_anomalies.delete_many({})
+            db.gnn_anomalies.insert_many(anomalies_to_save)
+            # Create index for faster lookups
+            db.gnn_anomalies.create_index([("metadata.constituency_slug", 1)])
 
         return jsonify({
             "success": True,
-            "module": "anomalies",
-            "cached": False,
-            "data": {
-                "narrative_fields": {
-                    "summary": summary,
-                    "details": f"Graph Neural Network model (GVAE) detected {len(constituency_anomalies)} anomaly(s) out of {result.get('total_nodes_analyzed', 0)} total nodes analyzed. Anomaly rate: {result.get('anomaly_rate', 0):.1%}."
-                },
-                "chart_data": {
-                    "anomaly_points": anomaly_points,
-                    "normal_range": []
-                }
-            }
+            "message": f"GNN anomaly detection completed. {len(anomalies_to_save)} anomalies saved to database.",
+            "data": result,
         }), 200
 
     except Exception as e:
-        logging.exception("Error getting GNN anomalies by constituency")
+        logging.exception("Error in GNN anomaly detection")
         return jsonify({"error": "Internal server error", "details": str(e)}), 500
 
 
