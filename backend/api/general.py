@@ -389,7 +389,7 @@ def train_gnn_anomaly_model():
 
 @general_bp.route("/anomalies/gnn/detect", methods=["GET"])
 def detect_gnn_anomalies():
-    """Detect anomalies using the trained GNN model"""
+    """Detect anomalies using the trained GNN model and save to database"""
     if not GNN_AVAILABLE:
         return jsonify({"error": "GNN anomaly detection is not available. Required dependencies are missing."}), 503
 
@@ -398,14 +398,34 @@ def detect_gnn_anomalies():
         detector = get_gnn_detector()
         result = detector.detect_anomalies(db)
 
-        if result["status"] == "success":
-            return jsonify({
-                "success": True,
-                "message": "GNN anomaly detection completed successfully",
-                "data": result,
-            }), 200
+        if result["status"] != "success":
+            return jsonify({"error": "Failed to detect anomalies with GNN model", "details": result}), 500
 
-        return jsonify({"error": "Failed to detect anomalies with GNN model", "details": result}), 500
+        # Save anomalies to database for AI engine to use as context
+        anomalies_to_save = []
+        for anomaly in result.get("anomalies", []):
+            # Add metadata for easier querying
+            doc = {
+                "detection_timestamp": result.get("timestamp"),
+                "model_version": f"GVAE-{detector.embedding_dim}d-{detector.epochs}ep",
+                "total_nodes_analyzed": result.get("total_nodes_analyzed"),
+                "anomaly_rate": result.get("anomaly_rate"),
+                **anomaly
+            }
+            anomalies_to_save.append(doc)
+
+        if anomalies_to_save:
+            # Clear old anomalies and insert new ones
+            db.gnn_anomalies.delete_many({})
+            db.gnn_anomalies.insert_many(anomalies_to_save)
+            # Create index for faster lookups
+            db.gnn_anomalies.create_index([("metadata.constituency_slug", 1)])
+
+        return jsonify({
+            "success": True,
+            "message": f"GNN anomaly detection completed. {len(anomalies_to_save)} anomalies saved to database.",
+            "data": result,
+        }), 200
 
     except Exception as e:
         logging.exception("Error in GNN anomaly detection")

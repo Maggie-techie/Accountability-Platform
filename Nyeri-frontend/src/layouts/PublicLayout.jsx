@@ -5,12 +5,6 @@ import { Menu, X, Landmark, Shield, ChevronDown, Users, Building2, FileText, Cpu
 // Navigation structure with dropdown groups
 const navGroups = [
   {
-    label: 'Home',
-    to: '/',
-    icon: null,
-    isSingle: true,
-  },
-  {
     label: 'Leaders',
     icon: Users,
     items: [
