@@ -6,6 +6,9 @@ import json
 import logging
 import os
 import requests
+from dotenv import load_dotenv
+
+load_dotenv()
 
 ai_bp = Blueprint("ai", __name__)
 
@@ -211,7 +214,6 @@ def call_claude_api(prompt: str, model: str = None) -> dict:
                 "sample_labels": []
             }
         }
-    }
 
 
 def validate_and_extract_data(constituency_slug: str = None) -> dict:
@@ -283,6 +285,178 @@ def validate_and_extract_data(constituency_slug: str = None) -> dict:
         logging.error(f"Failed to extract data for AI analysis: {e}")
         return {"error": f"Data extraction failed: {str(e)}"}
 
+
+def generate_governor_summary(module: str) -> str:
+    """Generate a concise summary of governor data for a specific AI module."""
+    try:
+        db = get_db()
+
+        # Get key data
+        profile = db.county_leaders.find_one({})
+        finances = list(db.county_finances.find({}).sort("financial_year", 1))
+        audit_findings = list(db.county_audit.find({}))
+        departments = list(db.department_absorption.find({}))
+
+        if module == "fiscal_health":
+            # Summarize financial trends
+            fin_summary = []
+            for f in finances:
+                fin_summary.append(f"FY {f.get('financial_year', 'N/A')}: Equitable KSh {f.get('equitable_share_kshb', 0):.1f}B, Conditional KSh {f.get('conditional_grants_kshb', 0):.1f}B, OSR KSh {f.get('osr_kshb', 0):.1f}B, Expenditure KSh {f.get('expenditure_kshb', 0):.1f}B")
+
+            # Summarize audit findings
+            total_flagged = sum(a.get('amount_flagged_kshm', 0) for a in audit_findings if a.get('finding_type') == 'misappropriation')
+            mis_count = sum(1 for a in audit_findings if a.get('finding_type') == 'misappropriation')
+
+            return f"""
+COUNTY PROFILE: {profile.get('name', 'Nyeri County') if profile else 'Nyeri County'}
+FINANCIAL TRENDS:
+{chr(10).join(fin_summary) if fin_summary else 'No financial data'}
+AUDIT SUMMARY: {mis_count} misappropriation findings, KSh {total_flagged:,.1f}M flagged
+DEPARTMENT COUNT: {len(departments)} departments
+"""
+
+        elif module == "dept_absorption":
+            dept_summary = []
+            for d in departments:
+                dept_summary.append(f"{d.get('department', 'Unknown')}: {d.get('absorption_rate', 0):.1f}% absorption, KSh {d.get('budget_allocated_kshm', 0):,.0f}M allocated, KSh {d.get('expenditure_kshm', 0):,.0f}M spent")
+
+            return f"""
+COUNTY PROFILE: {profile.get('name', 'Nyeri County') if profile else 'Nyeri County'}
+DEPARTMENT ABSORPTION:
+{chr(10).join(dept_summary) if dept_summary else 'No department data'}
+"""
+
+        elif module == "osr_analysis":
+            osr_summary = []
+            for f in finances:
+                osr_summary.append(f"FY {f.get('financial_year', 'N/A')}: OSR KSh {f.get('osr_kshb', 0):.1f}B (Target: KSh {f.get('osr_target_kshb', 0):.1f}B)")
+
+            return f"""
+COUNTY PROFILE: {profile.get('name', 'Nyeri County') if profile else 'Nyeri County'}
+OSR TRENDS:
+{chr(10).join(osr_summary) if osr_summary else 'No OSR data'}
+"""
+
+        elif module == "department_flags":
+            flagged = [d for d in departments if d.get('absorption_rate', 0) < 50 or d.get('absorption_rate', 0) > 100]
+            dept_summary = []
+            for d in departments:
+                risk = "HIGH" if d.get('absorption_rate', 0) < 50 else "MEDIUM" if d.get('absorption_rate', 0) < 70 else "LOW"
+                dept_summary.append(f"{d.get('department', 'Unknown')}: {d.get('absorption_rate', 0):.1f}% absorption (Risk: {risk})")
+
+            return f"""
+COUNTY PROFILE: {profile.get('name', 'Nyeri County') if profile else 'Nyeri County'}
+DEPARTMENT RISK FLAGS ({len(flagged)} flagged):
+{chr(10).join(dept_summary) if dept_summary else 'No department data'}
+"""
+
+        elif module == "top_risks":
+            # Combine financial, audit, and department risks
+            mis_count = sum(1 for a in audit_findings if a.get('finding_type') == 'misappropriation')
+            total_flagged = sum(a.get('amount_flagged_kshm', 0) for a in audit_findings if a.get('finding_type') == 'misappropriation')
+            low_absorption = [d for d in departments if d.get('absorption_rate', 0) < 70]
+
+            return f"""
+COUNTY PROFILE: {profile.get('name', 'Nyeri County') if profile else 'Nyeri County'}
+TOP RISKS:
+- {mis_count} audit misappropriations (KSh {total_flagged:,.1f}M flagged)
+- {len(low_absorption)} departments with <70% absorption
+- Financial sustainability: {'CONCERN' if any(f.get('expenditure_kshb', 0) > f.get('equitable_share_kshb', 0) + f.get('conditional_grants_kshb', 0) + f.get('osr_kshb', 0) for f in finances) else 'STABLE'}
+"""
+
+        else:
+            # Generic summary
+            return f"""
+COUNTY PROFILE: {profile.get('name', 'Nyeri County') if profile else 'Nyeri County'}
+FINANCIAL YEARS: {len(finances)}
+AUDIT FINDINGS: {len(audit_findings)} total
+DEPARTMENTS: {len(departments)}
+"""
+    except Exception as e:
+        logging.error(f"Failed to generate governor summary: {e}")
+        return "Error generating summary"
+
+
+def generate_constituency_summary(constituency_slug: str, module: str) -> str:
+    """Generate a concise summary of constituency data for a specific AI module."""
+    try:
+        db = get_db()
+
+        constituency = db.constituencies.find_one({"slug": constituency_slug})
+        if not constituency:
+            return f"Constituency not found: {constituency_slug}"
+
+        allocations = list(db.allocations.find({"constituency_slug": constituency_slug}))
+        audit_findings = list(db.audit_findings.find({"constituency_slug": constituency_slug}))
+        mp = db.mps.find_one({"constituency_slug": constituency_slug})
+
+        if module == "risk_score" or module == "risk_level" or module == "summary":
+            total_alloc = sum(a.get('amount_kshm', 0) for a in allocations)
+            mis_count = sum(1 for a in audit_findings if a.get('finding_type') == 'misappropriation')
+            total_flagged = sum(a.get('amount_at_risk', 0) for a in audit_findings if a.get('finding_type') == 'misappropriation')
+
+            alloc_summary = []
+            for a in allocations:
+                alloc_summary.append(f"FY {a.get('financial_year', 'N/A')}: KSh {a.get('amount_kshm', 0):,.0f}M ({a.get('category', 'Unknown')})")
+
+            return f"""
+CONSTITUENCY: {constituency.get('name', constituency_slug)}
+MP: {mp.get('name', 'Unknown') if mp else 'Unknown'}
+TOTAL ALLOCATIONS: KSh {total_alloc:,.0f}M across {len(allocations)} records
+AUDIT FINDINGS: {len(audit_findings)} total, {mis_count} misappropriations (KSh {total_flagged:,.0f}M at risk)
+ALLOCATION DETAILS:
+{chr(10).join(alloc_summary) if alloc_summary else 'No allocation data'}
+"""
+
+        elif module == "anomalies":
+            # Include GNN anomalies and high-severity audit findings
+            gnn_anomalies = list(db.gnn_anomalies.find({"metadata.constituency_slug": constituency_slug}))
+            high_severity = list(db.audit_findings.find({"constituency_slug": constituency_slug, "finding_type": "misappropriation"}))
+
+            gnn_summary = []
+            for a in gnn_anomalies:
+                gnn_summary.append(f"Score: {a.get('anomaly_score', 0):.2f}, Rank: {a.get('anomaly_rank', 'N/A')}, FY: {a.get('metadata', {}).get('fiscal_year', 'Unknown')}")
+
+            audit_summary = []
+            for a in high_severity:
+                audit_summary.append(f"FY {a.get('fy_reviewed', 'Unknown')}: {a.get('note', a.get('finding', 'Misappropriation'))}, Amount: {a.get('amount_at_risk', 'Unknown')}")
+
+            return f"""
+CONSTITUENCY: {constituency.get('name', constituency_slug)}
+MP: {mp.get('name', 'Unknown') if mp else 'Unknown'}
+GNN ANOMALIES: {len(gnn_anomalies)} detected
+{chr(10).join(gnn_summary) if gnn_summary else 'No GNN anomalies'}
+HIGH-SEVERITY AUDIT FINDINGS: {len(high_severity)}
+{chr(10).join(audit_summary) if audit_summary else 'No high-severity findings'}
+"""
+
+        elif module == "peer_rank":
+            all_constituencies = list(db.constituencies.find({}))
+            const_scores = []
+            for c in all_constituencies:
+                c_allocs = list(db.allocations.find({"constituency_slug": c["slug"]}))
+                c_audits = list(db.audit_findings.find({"constituency_slug": c["slug"]}))
+                total = sum(a.get('amount_kshm', 0) for a in c_allocs)
+                mis = sum(1 for a in c_audits if a.get('finding_type') == 'misappropriation')
+                const_scores.append(f"{c.get('name', c['slug'])}: KSh {total:,.0f}M allocated, {mis} misappropriations")
+
+            return f"""
+CONSTITUENCY: {constituency.get('name', constituency_slug)}
+PEER COMPARISON ({len(all_constituencies)} constituencies):
+{chr(10).join(const_scores)}
+"""
+
+        else:
+            return f"""
+CONSTITUENCY: {constituency.get('name', constituency_slug)}
+ALLOCATIONS: {len(allocations)} records
+AUDIT FINDINGS: {len(audit_findings)} total
+MP: {mp.get('name', 'Unknown') if mp else 'Unknown'}
+"""
+    except Exception as e:
+        logging.error(f"Failed to generate constituency summary: {e}")
+        return f"Error generating summary for {constituency_slug}"
+
 # MP AI Modules
 @ai_bp.route("/mp/<constituency_slug>/risk_score", methods=["GET"])
 def mp_risk_score(constituency_slug):
@@ -291,7 +465,7 @@ def mp_risk_score(constituency_slug):
         # Check cache first
         cache_parameters = {"constituency_slug": constituency_slug, "module": "risk_score"}
         cached_response = get_cached_ai_response(
-            prompt=f"Analyze risk for constituency {constituency_slug}",
+            prompt=f"v2: Analyze risk for constituency {constituency_slug}",
             model="claude",
             parameters=cache_parameters
         )
@@ -304,18 +478,25 @@ def mp_risk_score(constituency_slug):
                 "data": cached_response
             })
 
-        # Extract data
+        # Extract data (for validation)
         data = validate_and_extract_data(constituency_slug)
         if "error" in data:
             return jsonify({"error": data["error"]}), 404
+
+        # Generate concise summaries
+        constituency_summary = generate_constituency_summary(constituency_slug, "risk_score")
+        governor_summary = generate_governor_summary("risk_score")
 
         # Prepare prompt for Claude
         prompt = f"""
         Analyze the financial risk for the constituency with slug '{constituency_slug}'.
         Based on the following data, provide a risk assessment:
 
-        Constituency Data: {json.dumps(data.get('constituency', {}), default=str)}
-        Governor Data: {json.dumps(data.get('governor', {}), default=str)}
+        Constituency Summary:
+        {constituency_summary}
+
+        Governor Summary:
+        {governor_summary}
 
         Return ONLY a JSON object with exactly this structure:
         {{
@@ -360,7 +541,7 @@ def mp_risk_level(constituency_slug):
         # Check cache first
         cache_parameters = {"constituency_slug": constituency_slug, "module": "risk_level"}
         cached_response = get_cached_ai_response(
-            prompt=f"Analyze risk level for constituency {constituency_slug}",
+            prompt=f"v2: Analyze risk level for constituency {constituency_slug}",
             model="claude",
             parameters=cache_parameters
         )
@@ -373,18 +554,25 @@ def mp_risk_level(constituency_slug):
                 "data": cached_response
             })
 
-        # Extract data
+        # Extract data (for validation)
         data = validate_and_extract_data(constituency_slug)
         if "error" in data:
             return jsonify({"error": data["error"]}), 404
+
+        # Generate concise summaries
+        constituency_summary = generate_constituency_summary(constituency_slug, "risk_level")
+        governor_summary = generate_governor_summary("risk_level")
 
         # Prepare prompt for Claude
         prompt = f"""
         Analyze the risk level and anomalies for the constituency with slug '{constituency_slug}'.
         Based on the following data, provide insights:
 
-        Constituency Data: {json.dumps(data.get('constituency', {}), default=str)}
-        Governor Data: {json.dumps(data.get('governor', {}), default=str)}
+        Constituency Summary:
+        {constituency_summary}
+
+        Governor Summary:
+        {governor_summary}
 
         Return ONLY a JSON object with exactly this structure:
         {{
@@ -428,7 +616,7 @@ def mp_summary(constituency_slug):
         # Check cache first
         cache_parameters = {"constituency_slug": constituency_slug, "module": "summary"}
         cached_response = get_cached_ai_response(
-            prompt=f"Generate summary for constituency {constituency_slug}",
+            prompt=f"v2: Generate summary for constituency {constituency_slug}",
             model="claude",
             parameters=cache_parameters
         )
@@ -441,18 +629,25 @@ def mp_summary(constituency_slug):
                 "data": cached_response
             })
 
-        # Extract data
+        # Extract data (for validation)
         data = validate_and_extract_data(constituency_slug)
         if "error" in data:
             return jsonify({"error": data["error"]}), 404
+
+        # Generate concise summaries
+        constituency_summary = generate_constituency_summary(constituency_slug, "summary")
+        governor_summary = generate_governor_summary("summary")
 
         # Prepare prompt for Claude
         prompt = f"""
         Generate a comprehensive summary for the constituency with slug '{constituency_slug}'.
         Based on the following data, provide insights:
 
-        Constituency Data: {json.dumps(data.get('constituency', {}), default=str)}
-        Governor Data: {json.dumps(data.get('governor', {}), default=str)}
+        Constituency Summary:
+        {constituency_summary}
+
+        Governor Summary:
+        {governor_summary}
 
         Return ONLY a JSON object with exactly this structure:
         {{
@@ -495,7 +690,7 @@ def mp_anomalies(constituency_slug):
         # Check cache first
         cache_parameters = {"constituency_slug": constituency_slug, "module": "anomalies"}
         cached_response = get_cached_ai_response(
-            prompt=f"Detect anomalies for constituency {constituency_slug}",
+            prompt=f"v2: Detect anomalies for constituency {constituency_slug}",
             model="claude",
             parameters=cache_parameters
         )
@@ -508,7 +703,7 @@ def mp_anomalies(constituency_slug):
                 "data": cached_response
             })
 
-        # Extract data
+        # Extract data (for validation)
         data = validate_and_extract_data(constituency_slug)
         if "error" in data:
             return jsonify({"error": data["error"]}), 404
@@ -561,6 +756,10 @@ def mp_anomalies(constituency_slug):
         else:
             audit_context = "\n\nNo high-severity audit findings (misappropriations) found for this constituency in the current dataset."
 
+        # Generate concise summaries
+        constituency_summary = generate_constituency_summary(constituency_slug, "anomalies")
+        governor_summary = generate_governor_summary("anomalies")
+
         # Prepare prompt for Claude with GNN context
         prompt = f"""
         You are a financial analyst explaining anomalies and audit findings for the constituency '{constituency_slug}'.
@@ -573,8 +772,11 @@ def mp_anomalies(constituency_slug):
         {gnn_context}
         {audit_context}
 
-        Constituency Data: {json.dumps(data.get('constituency', {}), default=str)}
-        Governor Data: {json.dumps(data.get('governor', {}), default=str)}
+        Constituency Summary:
+        {constituency_summary}
+
+        Governor Summary:
+        {governor_summary}
 
         Return ONLY a JSON object with exactly this structure:
         {{
@@ -622,7 +824,7 @@ def mp_peer_rank(constituency_slug):
         # Check cache first
         cache_parameters = {"constituency_slug": constituency_slug, "module": "peer_rank"}
         cached_response = get_cached_ai_response(
-            prompt=f"Analyze peer ranking for constituency {constituency_slug}",
+            prompt=f"v2: Analyze peer ranking for constituency {constituency_slug}",
             model="claude",
             parameters=cache_parameters
         )
@@ -634,22 +836,26 @@ def mp_peer_rank(constituency_slug):
                 "cached": True,
                 "data": cached_response
             })
-        
-        db = get_db()
 
-        # Extract data
+        # Extract data (for validation)
         data = validate_and_extract_data(constituency_slug)
         if "error" in data:
             return jsonify({"error": data["error"]}), 404
+
+        # Generate concise summaries
+        constituency_summary = generate_constituency_summary(constituency_slug, "peer_rank")
+        governor_summary = generate_governor_summary("peer_rank")
 
         # Prepare prompt for Claude
         prompt = f"""
         Analyze the peer ranking for the constituency with slug '{constituency_slug}' based on performance metrics.
         Compare this constituency to other constituencies in the county.
 
-        Constituency Data: {json.dumps(data.get('constituency', {}), default=str)}
-        Governor Data: {json.dumps(data.get('governor', {}), default=str)}
-        All Constituencies Data: {json.dumps(list(db.constituencies.find()), default=str)}
+        Constituency Summary:
+        {constituency_summary}
+
+        Governor Summary:
+        {governor_summary}
 
         Return ONLY a JSON object with exactly this structure:
         {{
@@ -693,7 +899,7 @@ def mp_citizen_actions(constituency_slug):
         # Check cache first
         cache_parameters = {"constituency_slug": constituency_slug, "module": "citizen_actions"}
         cached_response = get_cached_ai_response(
-            prompt=f"Generate citizen action recommendations for constituency {constituency_slug}",
+            prompt=f"v2: Generate citizen action recommendations for constituency {constituency_slug}",
             model="claude",
             parameters=cache_parameters
         )
@@ -706,18 +912,25 @@ def mp_citizen_actions(constituency_slug):
                 "data": cached_response
             })
 
-        # Extract data
+        # Extract data (for validation)
         data = validate_and_extract_data(constituency_slug)
         if "error" in data:
             return jsonify({"error": data["error"]}), 404
+
+        # Generate concise summaries
+        constituency_summary = generate_constituency_summary(constituency_slug, "citizen_actions")
+        governor_summary = generate_governor_summary("citizen_actions")
 
         # Prepare prompt for Claude
         prompt = f"""
         Generate recommended actions for citizens for the constituency with slug '{constituency_slug}'.
         Based on audit findings, financial data, and performance metrics, suggest specific actions citizens can take.
 
-        Constituency Data: {json.dumps(data.get('constituency', {}), default=str)}
-        Governor Data: {json.dumps(data.get('governor', {}), default=str)}
+        Constituency Summary:
+        {constituency_summary}
+
+        Governor Summary:
+        {governor_summary}
 
         Return ONLY a JSON object with exactly this structure:
         {{
@@ -761,7 +974,7 @@ def mp_data_sources(constituency_slug):
         # Check cache first
         cache_parameters = {"constituency_slug": constituency_slug, "module": "data_sources"}
         cached_response = get_cached_ai_response(
-            prompt=f"Analyze data sources for constituency {constituency_slug}",
+            prompt=f"v2: Analyze data sources for constituency {constituency_slug}",
             model="claude",
             parameters=cache_parameters
         )
@@ -774,18 +987,25 @@ def mp_data_sources(constituency_slug):
                 "data": cached_response
             })
 
-        # Extract data
+        # Extract data (for validation)
         data = validate_and_extract_data(constituency_slug)
         if "error" in data:
             return jsonify({"error": data["error"]}), 404
+
+        # Generate concise summaries
+        constituency_summary = generate_constituency_summary(constituency_slug, "data_sources")
+        governor_summary = generate_governor_summary("data_sources")
 
         # Prepare prompt for Claude
         prompt = f"""
         Evaluate the data sources and quality for the constituency with slug '{constituency_slug}'.
         Assess reliability, completeness, and timeliness of the data used for analysis.
 
-        Constituency Data: {json.dumps(data.get('constituency', {}), default=str)}
-        Governor Data: {json.dumps(data.get('governor', {}), default=str)}
+        Constituency Summary:
+        {constituency_summary}
+
+        Governor Summary:
+        {governor_summary}
 
         Return ONLY a JSON object with exactly this structure:
         {{
@@ -873,7 +1093,7 @@ def governor_fiscal_health():
         # Check cache first
         cache_parameters = {"module": "fiscal_health"}
         cached_response = get_cached_ai_response(
-            prompt="Analyze fiscal health of county government",
+            prompt="v2: Analyze fiscal health of county government",
             model="claude",
             parameters=cache_parameters
         )
@@ -886,17 +1106,15 @@ def governor_fiscal_health():
                 "data": cached_response
             })
 
-        # Extract data
-        data = validate_and_extract_data()  # No constituency slug for governor-wide analysis
-        if "error" in data:
-            return jsonify({"error": data["error"]}), 404
-        
-        # Fix the prompt formatting
-        prompt = """
+        # Generate concise summary for fiscal health analysis
+        governor_summary = generate_governor_summary("fiscal_health")
+
+        prompt = f"""
         Analyze the fiscal health of the county government based on financial data, audit findings, and department performance.
         Assess overall financial stability, sustainability, and performance.
 
-        Governor Data: {governor_data}
+        Governor Data Summary:
+        {governor_summary}
 
         Return ONLY a JSON object with exactly this structure:
         {{
@@ -911,7 +1129,7 @@ def governor_fiscal_health():
             "osr_trend": [{{"fy": "string", "target": number, "actual": number}}]
           }}
         }}
-        """.format(governor_data=json.dumps(data.get('governor', {}), default=str))
+        """
 
         # Call Claude API (mock for now)
         ai_response = call_claude_api(prompt)
@@ -942,7 +1160,7 @@ def governor_dept_absorption():
         # Check cache first
         cache_parameters = {"module": "dept_absorption"}
         cached_response = get_cached_ai_response(
-            prompt="Analyze department budget absorption rates",
+            prompt="v2: Analyze department budget absorption rates",
             model="claude",
             parameters=cache_parameters
         )
@@ -955,17 +1173,16 @@ def governor_dept_absorption():
                 "data": cached_response
             })
 
-        # Extract data
-        data = validate_and_extract_data()  # No constituency slug for governor-wide analysis
-        if "error" in data:
-            return jsonify({"error": data["error"]}), 404
+        # Generate concise summary for department absorption analysis
+        governor_summary = generate_governor_summary("dept_absorption")
 
         # Prepare prompt for Claude
-        prompt = """
+        prompt = f"""
         Analyze department budget absorption rates and identify risks.
         Assess how well departments are utilizing their allocated budgets.
 
-        Governor Data: {governor_data}
+        Governor Data Summary:
+        {governor_summary}
 
         Return ONLY a JSON object with exactly this structure:
         {{
@@ -977,7 +1194,7 @@ def governor_dept_absorption():
             "dept_absorption": [{{"name": "string", "pct": number, "risk_level": string}}]
           }}
         }}
-        """.format(governor_data=json.dumps(data.get('governor', {}), default=str))
+        """
 
         # Call Claude API (mock for now)
         ai_response = call_claude_api(prompt)
@@ -1008,7 +1225,7 @@ def governor_osr_analysis():
         # Check cache first
         cache_parameters = {"module": "osr_analysis"}
         cached_response = get_cached_ai_response(
-            prompt="Analyze Own Source Revenue (OSR) performance",
+            prompt="v2: Analyze Own Source Revenue (OSR) performance",
             model="claude",
             parameters=cache_parameters
         )
@@ -1021,17 +1238,16 @@ def governor_osr_analysis():
                 "data": cached_response
             })
 
-        # Extract data
-        data = validate_and_extract_data()  # No constituency slug for governor-wide analysis
-        if "error" in data:
-            return jsonify({"error": data["error"]}), 404
+        # Generate concise summary for OSR analysis
+        governor_summary = generate_governor_summary("osr_analysis")
 
         # Prepare prompt for Claude
-        prompt = """
+        prompt = f"""
         Analyze Own Source Revenue (OSR) performance and trends.
         Evaluate the county's ability to generate revenue from local sources.
 
-        Governor Data: {governor_data}
+        Governor Data Summary:
+        {governor_summary}
 
         Return ONLY a JSON object with exactly this structure:
         {{
@@ -1044,7 +1260,7 @@ def governor_osr_analysis():
             "osr_growth": [{{"fy": "string", "growth_rate": number}}]
           }}
         }}
-        """.format(governor_data=json.dumps(data.get('governor', {}), default=str))
+        """
 
         # Call Claude API (mock for now)
         ai_response = call_claude_api(prompt)
@@ -1075,7 +1291,7 @@ def governor_department_flags():
         # Check cache first
         cache_parameters = {"module": "department_flags"}
         cached_response = get_cached_ai_response(
-            prompt="Identify department-specific risk flags",
+            prompt="v2: Identify department-specific risk flags",
             model="claude",
             parameters=cache_parameters
         )
@@ -1088,17 +1304,16 @@ def governor_department_flags():
                 "data": cached_response
             })
 
-        # Extract data
-        data = validate_and_extract_data()  # No constituency slug for governor-wide analysis
-        if "error" in data:
-            return jsonify({"error": data["error"]}), 404
+        # Generate concise summary for department flags analysis
+        governor_summary = generate_governor_summary("department_flags")
 
         # Prepare prompt for Claude
-        prompt = """
+        prompt = f"""
         Identify department-specific risk flags based on budget performance and audit findings.
         Highlight departments that require attention or intervention.
 
-        Governor Data: {governor_data}
+        Governor Data Summary:
+        {governor_summary}
 
         Return ONLY a JSON object with exactly this structure:
         {{
@@ -1111,7 +1326,7 @@ def governor_department_flags():
             "trend_indicators": [{{"name": "string", "trend": "string", "significance": number}}]
           }}
         }}
-        """.format(governor_data=json.dumps(data.get('governor', {}), default=str))
+        """
 
         # Call Claude API (mock for now)
         ai_response = call_claude_api(prompt)
@@ -1142,7 +1357,7 @@ def governor_top_risks():
         # Check cache first
         cache_parameters = {"module": "top_risks"}
         cached_response = get_cached_ai_response(
-            prompt="Identify top risks and recommend citizen actions for county government",
+            prompt="v2: Identify top risks and recommend citizen actions for county government",
             model="claude",
             parameters=cache_parameters
         )
@@ -1155,17 +1370,16 @@ def governor_top_risks():
                 "data": cached_response
             })
 
-        # Extract data
-        data = validate_and_extract_data()  # No constituency slug for governor-wide analysis
-        if "error" in data:
-            return jsonify({"error": data["error"]}), 404
+        # Generate concise summary for top risks analysis
+        governor_summary = generate_governor_summary("top_risks")
 
         # Prepare prompt for Claude
-        prompt = """
+        prompt = f"""
         Identify the top risks facing the county government and recommend citizen actions.
         Assess financial, operational, and governance risks that could impact service delivery.
 
-        Governor Data: {governor_data}
+        Governor Data Summary:
+        {governor_summary}
 
         Return ONLY a JSON object with exactly this structure:
         {{
@@ -1178,7 +1392,7 @@ def governor_top_risks():
             "action_impact": [{{"action": "string", "impact": number, "feasibility": number}}]
           }}
         }}
-        """.format(governor_data=json.dumps(data.get('governor', {}), default=str))
+        """
 
         # Call Claude API (mock for now)
         ai_response = call_claude_api(prompt)
@@ -1210,7 +1424,7 @@ def county_narrative():
         # Check cache first
         cache_parameters = {"module": "county_narrative"}
         cached_response = get_cached_ai_response(
-            prompt="Generate county narrative covering both MP and Governor perspectives",
+            prompt="v2: Generate county narrative covering both MP and Governor perspectives",
             model="claude",
             parameters=cache_parameters
         )
@@ -1223,18 +1437,32 @@ def county_narrative():
                 "data": cached_response
             })
 
-        # Extract data
-        data = validate_and_extract_data()  # No constituency slug for county-wide analysis
-        if "error" in data:
-            return jsonify({"error": data["error"]}), 404
+        # Generate concise summaries
+        governor_summary = generate_governor_summary("county_narrative")
+
+        # Get aggregated constituency summary
+        db = get_db()
+        all_constituencies = list(db.constituencies.find({}))
+        const_summaries = []
+        for c in all_constituencies:
+            c_allocs = list(db.allocations.find({"constituency_slug": c["slug"]}))
+            c_audits = list(db.audit_findings.find({"constituency_slug": c["slug"]}))
+            total = sum(a.get('amount_kshm', 0) for a in c_allocs)
+            mis = sum(1 for a in c_audits if a.get('finding_type') == 'misappropriation')
+            const_summaries.append(f"{c.get('name', c['slug'])}: KSh {total:,.0f}M allocated, {mis} misappropriations")
+
+        constituency_summary = "\n".join(const_summaries)
 
         # Prepare prompt for Claude
-        prompt = """
+        prompt = f"""
         Generate a comprehensive county narrative covering both MP (NG-CDF) and Governor (county executive) perspectives.
         Include analysis of cross-leader relationships, shared risks, and collaborative opportunities.
 
-        Governor Data: {governor_data}
-        Constituency Data Summary: {constituency_data_summary}
+        Governor Data Summary:
+        {governor_summary}
+
+        Constituency Data Summary:
+        {constituency_summary}
 
         Return ONLY a JSON object with exactly this structure:
         {{
@@ -1248,10 +1476,7 @@ def county_narrative():
             "constituency_risk_scores": [{{"name": "string", "score": number}}]
           }}
         }}
-        """.format(
-            governor_data=json.dumps(data.get('governor', {}), default=str),
-            constituency_data_summary=json.dumps("Aggregated constituency data", default=str) if not data.get('constituency') else json.dumps(data.get('constituency', {}), default=str)
-        )
+        """
 
         # Call Claude API (mock for now)
         ai_response = call_claude_api(prompt)
@@ -1295,7 +1520,7 @@ def findings_classifier():
         # Only check cache if we have specific finding identifiers
         if finding_id or finding_text:
             cached_response = get_cached_ai_response(
-                prompt=f"Classify and analyze audit finding: {finding_text or finding_id}",
+                prompt=f"v2: Classify and analyze audit finding: {finding_text or finding_id}",
                 model="claude",
                 parameters=cache_parameters
             )
@@ -1384,7 +1609,7 @@ def compare_leaders():
         }
 
         cached_response = get_cached_ai_response(
-            prompt=f"Compare {leader1_type} {leader1_id} with {leader2_type} {leader2_id}",
+            prompt=f"v2: Compare {leader1_type} {leader1_id} with {leader2_type} {leader2_id}",
             model="claude",
             parameters=cache_parameters
         )
