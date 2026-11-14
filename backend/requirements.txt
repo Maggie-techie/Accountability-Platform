@@ -4,6 +4,7 @@ openpyxl
 flask
 flask-cors
 flask_jwt_extended
+flask-limiter
 dotenv
 torch
 torch-geometric

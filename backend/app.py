@@ -16,6 +16,7 @@ from api.auth import auth_bp
 from api.constituency import constituency_bp
 from api.governors import governor_bp
 from api.ai_engine import ai_bp
+from api.ai_engine.core.auth import init_ai_auth_and_rate_limiting
 import sys
 
 # Add project root to sys.path dynamically
@@ -47,6 +48,9 @@ def create_app() -> Flask:
     app.register_blueprint(ai_bp,        url_prefix="/api/ai")
     app.register_blueprint(general_bp,    url_prefix="/api")
     app.register_blueprint(reports_bp,    url_prefix="/api/reports")
+
+    # Initialize AI Engine auth and rate limiting
+    init_ai_auth_and_rate_limiting(app, ai_bp)
 
     #  Error handlers
     @app.errorhandler(404)
