@@ -14,7 +14,8 @@ from backend.api.ai_engine import (
     cache_ai_response,
     get_cached_ai_response,
     validate_and_extract_data,
-    call_claude_api
+    call_llm_api,
+    GROQ_MODEL
 )
 from datetime import datetime
 import logging
@@ -51,7 +52,7 @@ def warm_constituency_cache(constituency_slugs=None):
                 cache_parameters = {"constituency_slug": slug, "module": module}
                 cached = get_cached_ai_response(
                     prompt=f"Analyze {module} for constituency {slug}",
-                    model="claude",
+                    model=GROQ_MODEL,
                     parameters=cache_parameters
                 )
 
@@ -94,7 +95,7 @@ def warm_constituency_cache(constituency_slugs=None):
                 # Cache the response
                 cache_ai_response(
                     prompt=full_prompt,
-                    model="claude",
+                    model=GROQ_MODEL,
                     parameters=cache_parameters,
                     response=ai_response,
                     ttl_hours=24
@@ -131,7 +132,7 @@ def warm_governor_cache():
                 cache_parameters = {"module": module}
                 cached = get_cached_ai_response(
                     prompt=f"Analyze {module} for governor",
-                    model="claude",
+                    model=GROQ_MODEL,
                     parameters=cache_parameters
                 )
 
@@ -171,7 +172,7 @@ def warm_governor_cache():
                 # Cache the response
                 cache_ai_response(
                     prompt=full_prompt,
-                    model="claude",
+                    model=GROQ_MODEL,
                     parameters=cache_parameters,
                     response=ai_response,
                     ttl_hours=24
@@ -194,7 +195,7 @@ def warm_county_narrative_cache():
         cache_parameters = {"module": "county_narrative"}
         cached = get_cached_ai_response(
             prompt="Generate county narrative covering both MP and Governor perspectives",
-            model="claude",
+            model=GROQ_MODEL,
             parameters=cache_parameters
         )
 
@@ -232,7 +233,7 @@ def warm_county_narrative_cache():
         # Cache the response
         cache_ai_response(
             prompt=full_prompt,
-            model="claude",
+            model=GROQ_MODEL,
             parameters=cache_parameters,
             response=ai_response,
             ttl_hours=24
@@ -252,7 +253,7 @@ def warm_finding_classifier_cache():
         cache_parameters = {"module": "finding_classifier"}
         cached = get_cached_ai_response(
             prompt="Classify and analyze audit findings",
-            model="claude",
+            model=GROQ_MODEL,
             parameters=cache_parameters
         )
 
@@ -289,7 +290,7 @@ def warm_finding_classifier_cache():
         # Cache the response
         cache_ai_response(
             prompt=full_prompt,
-            model="claude",
+            model=GROQ_MODEL,
             parameters=cache_parameters,
             response=ai_response,
             ttl_hours=24
@@ -309,7 +310,7 @@ def warm_cross_leader_comparator_cache():
         cache_parameters = {"module": "cross_leader_comparator"}
         cached = get_cached_ai_response(
             prompt="Compare MP and Governor performance",
-            model="claude",
+            model=GROQ_MODEL,
             parameters=cache_parameters
         )
 
@@ -347,7 +348,7 @@ def warm_cross_leader_comparator_cache():
         # Cache the response
         cache_ai_response(
             prompt=full_prompt,
-            model="claude",
+            model=GROQ_MODEL,
             parameters=cache_parameters,
             response=ai_response,
             ttl_hours=24

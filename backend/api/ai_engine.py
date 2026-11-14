@@ -1,6 +1,6 @@
 from flask import Blueprint, request, jsonify
 from api.database.connection import get_db
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import hashlib
 import json
 import logging
@@ -17,7 +17,7 @@ ai_bp = Blueprint("ai", __name__)
 # AI Cache configuration
 AI_CACHE_TTL_HOURS = int(os.getenv("AI_CACHE_TTL_HOURS", "24"))
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
 # In-memory locks for cache keys (prevents thundering herd)
 # For multi-worker deployments, consider using Redis or MongoDB-based locks
@@ -31,27 +31,47 @@ def get_cache_lock(cache_key: str) -> threading.Lock:
             _cache_locks[cache_key] = threading.Lock()
         return _cache_locks[cache_key]
 
-def get_ai_cache_collection():
-    """Get or create the AI cache collection, reusing the connection."""
-    db = get_db()
-    collection = db.ai_cache
 
-    # Create TTL index for automatic cleanup if it doesn't exist
+def _error(summary: str, details: str) -> dict:
+    """Return a standardized error response that won't be cached."""
+    return {
+        "_error": True,
+        "narrative_fields": {
+            "summary": f"Error: {summary}",
+            "details": details
+        },
+        "chart_data": {
+            "sample_array": [],
+            "sample_labels": []
+        }
+    }
+
+
+# Create TTL index once at startup
+def _ensure_cache_index():
+    """Ensure the cache TTL index exists. Call once at app startup."""
     try:
+        collection = get_db().ai_cache
         collection.create_index(
             "expires_at",
             expireAfterSeconds=0,
             background=True
         )
-    except Exception as e:
-        # Index might already exist, which is fine
+    except Exception:
         pass
 
-    return collection
+
+_ensure_cache_index()
+
+
+def get_ai_cache_collection():
+    """Get the AI cache collection."""
+    db = get_db()
+    return db.ai_cache
+
 
 def generate_cache_key(prompt: str, model: str, parameters: dict) -> str:
     """Generate a unique cache key for AI requests."""
-    # Create a deterministic hash of the prompt, model, and parameters
     cache_data = {
         "prompt": prompt,
         "model": model,
@@ -60,13 +80,16 @@ def generate_cache_key(prompt: str, model: str, parameters: dict) -> str:
     cache_string = json.dumps(cache_data, sort_keys=True)
     return hashlib.sha256(cache_string.encode()).hexdigest()
 
+
 def cache_ai_response(prompt: str, model: str, parameters: dict, response: dict, ttl_hours: int = AI_CACHE_TTL_HOURS) -> bool:
-    """Cache an AI response with TTL."""
+    """Cache an AI response with TTL. Skips caching if response has _error flag."""
+    if response.get("_error"):
+        return False
     try:
         collection = get_ai_cache_collection()
 
         cache_key = generate_cache_key(prompt, model, parameters)
-        expires_at = datetime.utcnow() + timedelta(hours=ttl_hours)
+        expires_at = datetime.now(timezone.utc) + timedelta(hours=ttl_hours)
 
         cache_document = {
             "cache_key": cache_key,
@@ -74,12 +97,11 @@ def cache_ai_response(prompt: str, model: str, parameters: dict, response: dict,
             "model": model,
             "parameters": parameters,
             "response": response,
-            "created_at": datetime.utcnow(),
+            "created_at": datetime.now(timezone.utc),
             "expires_at": expires_at,
             "ttl_hours": ttl_hours
         }
 
-        # Upsert: insert if doesn't exist, update if does
         collection.replace_one(
             {"cache_key": cache_key},
             cache_document,
@@ -93,6 +115,7 @@ def cache_ai_response(prompt: str, model: str, parameters: dict, response: dict,
         logging.error(f"Failed to cache AI response: {e}")
         return False
 
+
 def get_cached_ai_response(prompt: str, model: str, parameters: dict) -> dict | None:
     """Retrieve a cached AI response if it exists and hasn't expired."""
     try:
@@ -100,8 +123,12 @@ def get_cached_ai_response(prompt: str, model: str, parameters: dict) -> dict | 
 
         cache_key = generate_cache_key(prompt, model, parameters)
 
-        # Find the cache document (will automatically exclude expired ones due to TTL index)
-        cached_doc = collection.find_one({"cache_key": cache_key})
+        # Filter out expired entries (TTL index may not have cleaned up yet)
+        now = datetime.now(timezone.utc)
+        cached_doc = collection.find_one({
+            "cache_key": cache_key,
+            "expires_at": {"$gt": now}
+        })
 
         if cached_doc:
             logging.info(f"Cache hit for AI response with key: {cache_key[:16]}...")
@@ -121,84 +148,52 @@ def get_or_compute_ai_response(prompt: str, model: str, parameters: dict, comput
 
     This prevents the thundering herd problem where multiple concurrent requests
     for the same cache key all miss the cache and hit the API simultaneously.
-
-    Args:
-        prompt: The prompt for the AI
-        model: The model to use
-        parameters: Cache parameters (used for cache key)
-        compute_fn: Function to call to compute the response (e.g., call_claude_api)
-        ttl_hours: Cache TTL in hours
-
-    Returns:
-        The AI response (from cache or freshly computed)
     """
     cache_key = generate_cache_key(prompt, model, parameters)
     lock = get_cache_lock(cache_key)
 
-    # Try to get from cache first (fast path)
+    # Fast path: try cache without lock
     cached = get_cached_ai_response(prompt, model, parameters)
     if cached is not None:
         return cached
 
-    # Cache miss - acquire lock to prevent stampede
-    acquired = lock.acquire(timeout=30)  # Wait up to 30s for lock
-    if not acquired:
-        logging.warning(f"Could not acquire lock for cache key {cache_key[:16]}, proceeding without lock")
-        # Fallback: try cache again, then compute if still missing
-        cached = get_cached_ai_response(prompt, model, parameters)
-        if cached is not None:
-            return cached
-    else:
-        try:
-            # Double-check cache after acquiring lock (another request may have populated it)
+    # Cache miss: acquire lock
+    acquired = lock.acquire(timeout=30)
+    try:
+        if acquired:
+            # Double-check cache after acquiring lock
             cached = get_cached_ai_response(prompt, model, parameters)
             if cached is not None:
                 return cached
-        finally:
-            # We don't release here - we'll release after computing
-            pass
 
-    try:
         # Compute the response
         logging.info(f"Computing AI response for cache key: {cache_key[:16]}...")
         response = compute_fn(prompt, model)
 
-        # Cache the response
-        cache_ai_response(prompt, model, parameters, response, ttl_hours)
+        # Cache only successful responses
+        if not response.get("_error"):
+            cache_ai_response(prompt, model, parameters, response, ttl_hours)
 
         return response
     finally:
-        # Always release the lock
         if acquired:
             lock.release()
 
-def call_claude_api(prompt: str, model: str = None) -> dict:
+
+def call_llm_api(prompt: str, model: str = None) -> dict:
     """
     Call Groq API to get analysis.
     Uses the Groq API key and model from environment.
     Includes retry logic with exponential backoff for rate limits (429).
     """
-    # If model is not provided, use the default from environment
     if model is None:
-        model = os.getenv("GROQ_MODEL", "llama-3.1-70b-versatile")
+        model = GROQ_MODEL
 
-    # Check if API key is set
-    api_key = os.getenv("GROQ_API_KEY")
+    api_key = GROQ_API_KEY
     if not api_key:
         logging.error("GROQ_API_KEY not set in environment variables")
-        # Return a mock error response that matches the expected structure
-        return {
-            "narrative_fields": {
-                "summary": "Error: Groq API key not configured",
-                "details": "Please set the GROQ_API_KEY environment variable"
-            },
-            "chart_data": {
-                "sample_array": [],
-                "sample_labels": []
-            }
-        }
+        return _error("Groq API key not configured", "Please set the GROQ_API_KEY environment variable")
 
-    # Groq API endpoint
     url = "https://api.groq.com/openai/v1/chat/completions"
 
     headers = {
@@ -214,8 +209,8 @@ def call_claude_api(prompt: str, model: str = None) -> dict:
                 "content": prompt
             }
         ],
-        "temperature": 0.7,
-        "max_tokens": 2000,
+        "temperature": 0.2,
+        "max_tokens": 4000,
         "response_format": {"type": "json_object"}
     }
 
@@ -230,7 +225,6 @@ def call_claude_api(prompt: str, model: str = None) -> dict:
             # Handle rate limiting (429) with retry
             if response.status_code == 429:
                 if attempt < max_retries - 1:
-                    # Extract retry-after header if present
                     retry_after = response.headers.get('retry-after')
                     if retry_after:
                         try:
@@ -245,18 +239,11 @@ def call_claude_api(prompt: str, model: str = None) -> dict:
                     continue
                 else:
                     logging.error("Max retries reached for rate limit")
-                    return {
-                        "narrative_fields": {
-                            "summary": "Error: Rate limit exceeded",
-                            "details": "Too many requests to Groq API. Please wait a moment and try again."
-                        },
-                        "chart_data": {
-                            "sample_array": [],
-                            "sample_labels": []
-                        }
-                    }
+                    return _error("Rate limit exceeded", "Too many requests to Groq API. Please wait a moment and try again.")
 
-            response.raise_for_status()  # Raise an exception for bad status codes
+            if not response.ok:
+                logging.error(f"Groq {response.status_code}: {response.text[:300]}")
+                response.raise_for_status()
 
             result = response.json()
 
@@ -264,134 +251,36 @@ def call_claude_api(prompt: str, model: str = None) -> dict:
             if "choices" in result and len(result["choices"]) > 0:
                 message = result["choices"][0].get("message", {})
                 content = message.get("content", "")
+                finish_reason = result["choices"][0].get("finish_reason")
 
                 # Try to parse the content as JSON
                 try:
-                    # The content might be a JSON string, or it might have extra text.
-                    # We assume the prompt instructs the model to return ONLY a JSON object.
-                    # We'll try to parse the entire content as JSON.
                     parsed = json.loads(content)
                     return parsed
                 except json.JSONDecodeError as e:
                     logging.error(f"Failed to parse Groq response as JSON: {e}")
-                    logging.error(f"Response content: {content}")
-                    # Return a fallback structure
-                    return {
-                        "narrative_fields": {
-                            "summary": "Error: Failed to parse Groq response",
-                            "details": f"Groq API returned invalid JSON: {str(e)}"
-                        },
-                        "chart_data": {
-                            "sample_array": [],
-                            "sample_labels": []
-                        }
-                    }
+                    logging.error(f"Finish reason: {finish_reason}")
+                    logging.error(f"Response content: {content[:500]}")
+                    return _error("Failed to parse Groq response", f"Groq API returned invalid JSON: {str(e)}")
             else:
                 logging.error("No choices in Groq API response")
-                return {
-                    "narrative_fields": {
-                        "summary": "Error: Empty response from Groq API",
-                        "details": "The Groq API returned no choices"
-                    },
-                    "chart_data": {
-                        "sample_array": [],
-                        "sample_labels": []
-                    }
-                }
+                return _error("Empty response from Groq API", "The Groq API returned no choices")
         except requests.exceptions.RequestException as e:
             logging.error(f"Request to Groq API failed: {e}")
-            return {
-                "narrative_fields": {
-                    "summary": "Error: Groq API request failed",
-                    "details": f"Request error: {str(e)}"
-            },
-                "chart_data": {
-                    "sample_array": [],
-                    "sample_labels": []
-            }
-        }
+            return _error("Groq API request failed", "Network or request error")
         except Exception as e:
-            logging.error(f"Unexpected error in call_claude_api: {e}")
-            return {
-                "narrative_fields": {
-                    "summary": "Error: Internal error in AI service",
-                    "details": f"Unexpected error: {str(e)}"
-            },
-                "chart_data": {
-                    "sample_array": [],
-                    "sample_labels": []
-            }
-        }
+            logging.error(f"Unexpected error in call_llm_api: {e}")
+            return _error("Internal error in AI service", "Unexpected error")
 
 
-def validate_and_extract_data(constituency_slug: str = None) -> dict:
-    """
-    Extract and validate data for AI analysis based on constituency slug.
-    Returns structured data that can be passed to Claude for analysis.
-    """
+def validate_constituency_exists(constituency_slug: str) -> bool:
+    """Lightweight check that constituency exists."""
     try:
         db = get_db()
-
-        # Get constituency data
-        constituency_data = {}
-        if constituency_slug:
-            constituency = db.constituencies.find_one({"slug": constituency_slug})
-            if not constituency:
-                return {"error": f"Constituency not found: {constituency_slug}"}
-
-            # Convert ObjectId to string
-            constituency["_id"] = str(constituency["_id"])
-            constituency_data["constituency"] = constituency
-
-            # Get related allocations
-            allocations = list(db.allocations.find({"constituency_slug": constituency_slug}))
-            for alloc in allocations:
-                alloc["_id"] = str(alloc["_id"])
-            constituency_data["allocations"] = allocations
-
-            # Get related audit findings
-            audit_findings = list(db.audit_findings.find({"constituency_slug": constituency_slug}))
-            for finding in audit_findings:
-                finding["_id"] = str(finding["_id"])
-            constituency_data["audit_findings"] = audit_findings
-
-            # Get MP data
-            mp = db.mps.find_one({"constituency_slug": constituency_slug})
-            if mp:
-                mp["_id"] = str(mp["_id"])
-                constituency_data["mp"] = mp
-
-        # Get governor data (always available)
-        governor_data = {}
-
-        governor_profile = db.county_leaders.find_one({})
-        if governor_profile:
-            governor_profile["_id"] = str(governor_profile["_id"])
-            governor_data["profile"] = governor_profile
-
-        finances = list(db.county_finances.find({}))
-        for finance in finances:
-            finance["_id"] = str(finance["_id"])
-        governor_data["finances"] = finances
-
-        audit_findings = list(db.county_audit.find({}))
-        for finding in audit_findings:
-            finding["_id"] = str(finding["_id"])
-        governor_data["audit_findings"] = audit_findings
-
-        departments = list(db.department_absorption.find({}))
-        for dept in departments:
-            dept["_id"] = str(dept["_id"])
-        governor_data["departments"] = departments
-
-        return {
-            "constituency": constituency_data if constituency_slug else None,
-            "governor": governor_data
-        }
-
+        return db.constituencies.find_one({"slug": constituency_slug}, {"_id": 1}) is not None
     except Exception as e:
-        logging.error(f"Failed to extract data for AI analysis: {e}")
-        return {"error": f"Data extraction failed: {str(e)}"}
+        logging.error(f"Failed to validate constituency: {e}")
+        return False
 
 
 def generate_governor_summary(module: str) -> str:
@@ -399,19 +288,16 @@ def generate_governor_summary(module: str) -> str:
     try:
         db = get_db()
 
-        # Get key data
         profile = db.county_leaders.find_one({})
         finances = list(db.county_finances.find({}).sort("financial_year", 1))
         audit_findings = list(db.county_audit.find({}))
         departments = list(db.department_absorption.find({}))
 
         if module == "fiscal_health":
-            # Summarize financial trends
             fin_summary = []
             for f in finances:
                 fin_summary.append(f"FY {f.get('financial_year', 'N/A')}: Equitable KSh {f.get('equitable_share_kshb', 0):.1f}B, Conditional KSh {f.get('conditional_grants_kshb', 0):.1f}B, OSR KSh {f.get('osr_kshb', 0):.1f}B, Expenditure KSh {f.get('expenditure_kshb', 0):.1f}B")
 
-            # Summarize audit findings
             total_flagged = sum(a.get('amount_flagged_kshm', 0) for a in audit_findings if a.get('finding_type') == 'misappropriation')
             mis_count = sum(1 for a in audit_findings if a.get('finding_type') == 'misappropriation')
 
@@ -459,7 +345,6 @@ DEPARTMENT RISK FLAGS ({len(flagged)} flagged):
 """
 
         elif module == "top_risks":
-            # Combine financial, audit, and department risks
             mis_count = sum(1 for a in audit_findings if a.get('finding_type') == 'misappropriation')
             total_flagged = sum(a.get('amount_flagged_kshm', 0) for a in audit_findings if a.get('finding_type') == 'misappropriation')
             low_absorption = [d for d in departments if d.get('absorption_rate', 0) < 70]
@@ -473,7 +358,6 @@ TOP RISKS:
 """
 
         else:
-            # Generic summary
             return f"""
 COUNTY PROFILE: {profile.get('name', 'Nyeri County') if profile else 'Nyeri County'}
 FINANCIAL YEARS: {len(finances)}
@@ -498,10 +382,28 @@ def generate_constituency_summary(constituency_slug: str, module: str) -> str:
         audit_findings = list(db.audit_findings.find({"constituency_slug": constituency_slug}))
         mp = db.mps.find_one({"constituency_slug": constituency_slug})
 
-        if module == "risk_score" or module == "risk_level" or module == "summary":
+        # Safely sum amount_at_risk handling potential string values
+        def safe_sum_amount(findings, field):
+            total = 0
+            for f in findings:
+                val = f.get(field, 0)
+                if isinstance(val, (int, float)):
+                    total += val
+                elif isinstance(val, str):
+                    # Try to extract number from strings like "KSh 5M"
+                    try:
+                        import re
+                        num = re.search(r'[\d,]+\.?\d*', val.replace(',', ''))
+                        if num:
+                            total += float(num.group())
+                    except (ValueError, AttributeError):
+                        pass
+            return total
+
+        if module in ("risk_score", "risk_level", "summary"):
             total_alloc = sum(a.get('amount_kshm', 0) for a in allocations)
             mis_count = sum(1 for a in audit_findings if a.get('finding_type') == 'misappropriation')
-            total_flagged = sum(a.get('amount_at_risk', 0) for a in audit_findings if a.get('finding_type') == 'misappropriation')
+            total_flagged = safe_sum_amount(audit_findings, 'amount_at_risk')
 
             alloc_summary = []
             for a in allocations:
@@ -517,7 +419,6 @@ ALLOCATION DETAILS:
 """
 
         elif module == "anomalies":
-            # Include GNN anomalies and high-severity audit findings
             gnn_anomalies = list(db.gnn_anomalies.find({"metadata.constituency_slug": constituency_slug}))
             high_severity = list(db.audit_findings.find({"constituency_slug": constituency_slug, "finding_type": "misappropriation"}))
 
@@ -565,53 +466,52 @@ MP: {mp.get('name', 'Unknown') if mp else 'Unknown'}
         logging.error(f"Failed to generate constituency summary: {e}")
         return f"Error generating summary for {constituency_slug}"
 
+
 # MP AI Modules
 @ai_bp.route("/mp/<constituency_slug>/risk_score", methods=["GET"])
 def mp_risk_score(constituency_slug):
     """AI Risk Scorer Module for MP/Constituency"""
     try:
-        # Extract data (for validation)
-        data = validate_and_extract_data(constituency_slug)
-        if "error" in data:
-            return jsonify({"error": data["error"]}), 404
+        if not validate_constituency_exists(constituency_slug):
+            return jsonify({"error": f"Constituency not found: {constituency_slug}"}), 404
 
-        # Generate concise summaries
         constituency_summary = generate_constituency_summary(constituency_slug, "risk_score")
         governor_summary = generate_governor_summary("risk_score")
 
-        # Prepare prompt for Claude
         prompt = f"""
-        Analyze the financial risk for the constituency with slug '{constituency_slug}'.
-        Based on the following data, provide a risk assessment:
+Analyze the financial risk for the constituency with slug '{constituency_slug}'.
+Based on the following data, provide a risk assessment:
 
-        Constituency Summary:
-        {constituency_summary}
+Constituency Summary:
+{constituency_summary}
 
-        Governor Summary:
-        {governor_summary}
+Governor Summary:
+{governor_summary}
 
-        Return ONLY a JSON object with exactly this structure:
-        {{
-          "narrative_fields": {{
-            "risk_level": "string (e.g., Low, Medium, High)",
-            "summary": "string (brief summary of risk factors)"
-          }},
-          "chart_data": {{
-            "risk_score": number (0-100 for gauge visualization),
-            "citizen_actionspeer_scores": [{{"constituent": "string", "score": number}}],
-            "allocation_trend": [{{"fy": "string", "amount": number, "anomaly_flag": boolean}}]
-          }}
-        }}
-        """
+Return ONLY a JSON object with exactly this structure:
+{{
+  "narrative_fields": {{
+    "risk_level": "string (e.g., Low, Medium, High)",
+    "summary": "string (brief summary of risk factors)"
+  }},
+  "chart_data": {{
+    "risk_score": number (0-100 for gauge visualization),
+    "peer_scores": [{{"constituent": "string", "score": number}}],
+    "allocation_trend": [{{"fy": "string", "amount": number, "anomaly_flag": boolean}}]
+  }}
+}}
+"""
 
-        # Use get_or_compute_ai_response for stampede protection
         cache_parameters = {"constituency_slug": constituency_slug, "module": "risk_score"}
         ai_response = get_or_compute_ai_response(
             prompt=prompt,
-            model="claude",
+            model=GROQ_MODEL,
             parameters=cache_parameters,
-            compute_fn=lambda p, m: call_claude_api(p, m)
+            compute_fn=lambda p, m: call_llm_api(p, m)
         )
+
+        if ai_response.get("_error"):
+            return jsonify({"success": False, "module": "risk_score", "error": ai_response["narrative_fields"]["details"]}), 502
 
         return jsonify({
             "success": True,
@@ -621,53 +521,52 @@ def mp_risk_score(constituency_slug):
 
     except Exception as e:
         logging.error(f"Error in MP risk score: {e}")
-        return jsonify({"error": "Internal server error", "details": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
+
 
 @ai_bp.route("/mp/<constituency_slug>/risk_level", methods=["GET"])
 def mp_risk_level(constituency_slug):
     """AI Risk Level Analyzer Module for MP/Constituency"""
     try:
-        # Extract data (for validation)
-        data = validate_and_extract_data(constituency_slug)
-        if "error" in data:
-            return jsonify({"error": data["error"]}), 404
+        if not validate_constituency_exists(constituency_slug):
+            return jsonify({"error": f"Constituency not found: {constituency_slug}"}), 404
 
-        # Generate concise summaries
         constituency_summary = generate_constituency_summary(constituency_slug, "risk_level")
         governor_summary = generate_governor_summary("risk_level")
 
-        # Prepare prompt for Claude
         prompt = f"""
-        Analyze the risk level and anomalies for the constituency with slug '{constituency_slug}'.
-        Based on the following data, provide insights:
+Analyze the risk level and anomalies for the constituency with slug '{constituency_slug}'.
+Based on the following data, provide insights:
 
-        Constituency Summary:
-        {constituency_summary}
+Constituency Summary:
+{constituency_summary}
 
-        Governor Summary:
-        {governor_summary}
+Governor Summary:
+{governor_summary}
 
-        Return ONLY a JSON object with exactly this structure:
-        {{
-          "narrative_fields": {{
-            "summary": "string (explanation of risk level)",
-            "anomalies": "string (description of any anomalies found)",
-            "citizen_actions": "string (recommended actions for citizens)"
-          }},
-          "chart_data": {{
-            "peer_scores": [{{"constituent": "string", "score": number}}]
-          }}
-        }}
-        """
+Return ONLY a JSON object with exactly this structure:
+{{
+  "narrative_fields": {{
+    "summary": "string (explanation of risk level)",
+    "anomalies": "string (description of any anomalies found)",
+    "citizen_actions": "string (recommended actions for citizens)"
+  }},
+  "chart_data": {{
+    "peer_scores": [{{"constituent": "string", "score": number}}]
+  }}
+}}
+"""
 
-        # Use get_or_compute_ai_response for stampede protection
         cache_parameters = {"constituency_slug": constituency_slug, "module": "risk_level"}
         ai_response = get_or_compute_ai_response(
             prompt=prompt,
-            model="claude",
+            model=GROQ_MODEL,
             parameters=cache_parameters,
-            compute_fn=lambda p, m: call_claude_api(p, m)
+            compute_fn=lambda p, m: call_llm_api(p, m)
         )
+
+        if ai_response.get("_error"):
+            return jsonify({"success": False, "module": "risk_level", "error": ai_response["narrative_fields"]["details"]}), 502
 
         return jsonify({
             "success": True,
@@ -677,51 +576,50 @@ def mp_risk_level(constituency_slug):
 
     except Exception as e:
         logging.error(f"Error in MP risk level: {e}")
-        return jsonify({"error": "Internal server error", "details": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
+
 
 @ai_bp.route("/mp/<constituency_slug>/summary", methods=["GET"])
 def mp_summary(constituency_slug):
     """AI Summary Generator Module for MP/Constituency"""
     try:
-        # Extract data (for validation)
-        data = validate_and_extract_data(constituency_slug)
-        if "error" in data:
-            return jsonify({"error": data["error"]}), 404
+        if not validate_constituency_exists(constituency_slug):
+            return jsonify({"error": f"Constituency not found: {constituency_slug}"}), 404
 
-        # Generate concise summaries
         constituency_summary = generate_constituency_summary(constituency_slug, "summary")
         governor_summary = generate_governor_summary("summary")
 
-        # Prepare prompt for Claude
         prompt = f"""
-        Generate a comprehensive summary for the constituency with slug '{constituency_slug}'.
-        Based on the following data, provide insights:
+Generate a comprehensive summary for the constituency with slug '{constituency_slug}'.
+Based on the following data, provide insights:
 
-        Constituency Summary:
-        {constituency_summary}
+Constituency Summary:
+{constituency_summary}
 
-        Governor Summary:
-        {governor_summary}
+Governor Summary:
+{governor_summary}
 
-        Return ONLY a JSON object with exactly this structure:
-        {{
-          "narrative_fields": {{
-            "summary": "string (comprehensive summary of constituency performance)"
-          }},
-          "chart_data": {{
-            "key_metrics": [{{"label": "string", "value": number}}]
-          }}
-        }}
-        """
+Return ONLY a JSON object with exactly this structure:
+{{
+  "narrative_fields": {{
+    "summary": "string (comprehensive summary of constituency performance)"
+  }},
+  "chart_data": {{
+    "key_metrics": [{{"label": "string", "value": number}}]
+  }}
+}}
+"""
 
-        # Use get_or_compute_ai_response for stampede protection
         cache_parameters = {"constituency_slug": constituency_slug, "module": "summary"}
         ai_response = get_or_compute_ai_response(
             prompt=prompt,
-            model="claude",
+            model=GROQ_MODEL,
             parameters=cache_parameters,
-            compute_fn=lambda p, m: call_claude_api(p, m)
+            compute_fn=lambda p, m: call_llm_api(p, m)
         )
+
+        if ai_response.get("_error"):
+            return jsonify({"success": False, "module": "summary", "error": ai_response["narrative_fields"]["details"]}), 502
 
         return jsonify({
             "success": True,
@@ -731,25 +629,22 @@ def mp_summary(constituency_slug):
 
     except Exception as e:
         logging.error(f"Error in MP summary: {e}")
-        return jsonify({"error": "Internal server error", "details": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
+
 
 @ai_bp.route("/mp/<constituency_slug>/anomalies", methods=["GET"])
 def mp_anomalies(constituency_slug):
     """AI Anomalies Detector Module for MP/Constituency.
     Uses GNN-detected anomalies as context for LLM explanations."""
     try:
-        # Extract data (for validation)
-        data = validate_and_extract_data(constituency_slug)
-        if "error" in data:
-            return jsonify({"error": data["error"]}), 404
+        if not validate_constituency_exists(constituency_slug):
+            return jsonify({"error": f"Constituency not found: {constituency_slug}"}), 404
 
-        # Fetch GNN-detected anomalies for this constituency from database
         db = get_db()
         gnn_anomalies = list(db.gnn_anomalies.find({"metadata.constituency_slug": constituency_slug}))
         for a in gnn_anomalies:
             a["_id"] = str(a["_id"])
 
-        # Fetch high-severity audit findings (misappropriations) for this constituency
         high_severity_findings = list(db.audit_findings.find({
             "constituency_slug": constituency_slug,
             "finding_type": "misappropriation"
@@ -757,7 +652,6 @@ def mp_anomalies(constituency_slug):
         for f in high_severity_findings:
             f["_id"] = str(f["_id"])
 
-        # Build GNN context for LLM
         gnn_context = ""
         if gnn_anomalies:
             gnn_context = "\n\nGNN MODEL DETECTED ANOMALIES (use as primary context):\n"
@@ -776,9 +670,8 @@ def mp_anomalies(constituency_slug):
                 if audit.get('amount_flagged_kshm'):
                     gnn_context += f"  Amount Flagged: KSh {audit['amount_flagged_kshm']:,.1f}M\n"
         else:
-            gnn_context = "\n\nNo GNN-detected anomalies found for this constituency. The GNN model may not have been trained yet, or no anomalies were detected."
+            gnn_context = "\n\nNo GNN-detected anomalies found for this constituency."
 
-        # Add high-severity audit findings context
         audit_context = ""
         if high_severity_findings:
             audit_context = "\n\nHIGH-SEVERITY AUDIT FINDINGS (Misappropriations from Auditor-General reports):\n"
@@ -789,55 +682,55 @@ def mp_anomalies(constituency_slug):
                     audit_context += f" Amount at risk: {finding['amount_at_risk']}"
                 audit_context += "\n"
         else:
-            audit_context = "\n\nNo high-severity audit findings (misappropriations) found for this constituency in the current dataset."
+            audit_context = "\n\nNo high-severity audit findings (misappropriations) found."
 
-        # Generate concise summaries
         constituency_summary = generate_constituency_summary(constituency_slug, "anomalies")
         governor_summary = generate_governor_summary("anomalies")
 
-        # Prepare prompt for Claude with GNN context
         prompt = f"""
-        You are a financial analyst explaining anomalies and audit findings for the constituency '{constituency_slug}'.
+You are a financial analyst explaining anomalies and audit findings for the constituency '{constituency_slug}'.
 
-        The Graph Neural Network (GNN) model analyzes constituency-year and governor-year nodes in a financial graph, detecting anomalies via:
-        1. Graph reconstruction error (connectivity patterns)
-        2. Embedding space distance to k-nearest neighbors
-        3. Isolation Forest on node embeddings
+The Graph Neural Network (GNN) model analyzes constituency-year and governor-year nodes in a financial graph, detecting anomalies via:
+1. Graph reconstruction error (connectivity patterns)
+2. Embedding space distance to k-nearest neighbors
+3. Isolation Forest on node embeddings
 
-        {gnn_context}
-        {audit_context}
+{gnn_context}
+{audit_context}
 
-        Constituency Summary:
-        {constituency_summary}
+Constituency Summary:
+{constituency_summary}
 
-        Governor Summary:
-        {governor_summary}
+Governor Summary:
+{governor_summary}
 
-        Return ONLY a JSON object with exactly this structure:
-        {{
-          "narrative_fields": {{
-            "summary": "string (plain-language summary of GNN anomalies AND high-severity audit findings for citizens)",
-            "details": "string (detailed explanation combining GNN findings and audit misappropriations, why they matter, and recommended actions)"
-          }},
-          "chart_data": {{
-            "anomaly_points": [{{"fy": "string", "metric": "string", "value": number, "expected": number}}],
-            "normal_range": [{{"fy": "string", "min": number, "max": number}}]
-          }}
-        }}
+Return ONLY a JSON object with exactly this structure:
+{{
+  "narrative_fields": {{
+    "summary": "string (plain-language summary of GNN anomalies AND high-severity audit findings for citizens)",
+    "details": "string (detailed explanation combining GNN findings and audit misappropriations, why they matter, and recommended actions)"
+  }},
+  "chart_data": {{
+    "anomaly_points": [{{"fy": "string", "metric": "string", "value": number, "expected": number}}],
+    "normal_range": [{{"fy": "string", "min": number, "max": number}}]
+  }}
+}}
 
-        For anomaly_points, extract data from BOTH GNN anomalies and high-severity audit findings above.
-        Include audit misappropriations as anomaly points with metric "Audit Misappropriation".
-        For normal_range, provide typical ranges for the metrics based on the constituency's historical data.
-        """
+For anomaly_points, extract data from BOTH GNN anomalies and high-severity audit findings above.
+Include audit misappropriations as anomaly points with metric "Audit Misappropriation".
+For normal_range, provide typical ranges for the metrics based on the constituency's historical data.
+"""
 
-        # Use get_or_compute_ai_response for stampede protection
         cache_parameters = {"constituency_slug": constituency_slug, "module": "anomalies"}
         ai_response = get_or_compute_ai_response(
             prompt=prompt,
-            model="claude",
+            model=GROQ_MODEL,
             parameters=cache_parameters,
-            compute_fn=lambda p, m: call_claude_api(p, m)
+            compute_fn=lambda p, m: call_llm_api(p, m)
         )
+
+        if ai_response.get("_error"):
+            return jsonify({"success": False, "module": "anomalies", "error": ai_response["narrative_fields"]["details"]}), 502
 
         return jsonify({
             "success": True,
@@ -847,53 +740,52 @@ def mp_anomalies(constituency_slug):
 
     except Exception as e:
         logging.error(f"Error in MP anomalies: {e}")
-        return jsonify({"error": "Internal server error", "details": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
+
 
 @ai_bp.route("/mp/<constituency_slug>/peer_rank", methods=["GET"])
 def mp_peer_rank(constituency_slug):
     """AI Peer Rank Analyzer Module for MP/Constituency"""
     try:
-        # Extract data (for validation)
-        data = validate_and_extract_data(constituency_slug)
-        if "error" in data:
-            return jsonify({"error": data["error"]}), 404
+        if not validate_constituency_exists(constituency_slug):
+            return jsonify({"error": f"Constituency not found: {constituency_slug}"}), 404
 
-        # Generate concise summaries
         constituency_summary = generate_constituency_summary(constituency_slug, "peer_rank")
         governor_summary = generate_governor_summary("peer_rank")
 
-        # Prepare prompt for Claude
         prompt = f"""
-        Analyze the peer ranking for the constituency with slug '{constituency_slug}' based on performance metrics.
-        Compare this constituency to other constituencies in the county.
+Analyze the peer ranking for the constituency with slug '{constituency_slug}' based on performance metrics.
+Compare this constituency to other constituencies in the county.
 
-        Constituency Summary:
-        {constituency_summary}
+Constituency Summary:
+{constituency_summary}
 
-        Governor Summary:
-        {governor_summary}
+Governor Summary:
+{governor_summary}
 
-        Return ONLY a JSON object with exactly this structure:
-        {{
-          "narrative_fields": {{
-            "ranking_explanation": "string (explanation of ranking methodology)",
-            "insights": "string (key insights from peer comparison)"
-          }},
-          "chart_data": {{
-            "peer_scores": [{{"constituent": "string", "score": number}}],
-            "ranking_distribution": {{"excellent": number, "good": number, "average": number, "poor": number, "very_poor": number}}
-          }}
-        }}
-        """
+Return ONLY a JSON object with exactly this structure:
+{{
+  "narrative_fields": {{
+    "ranking_explanation": "string (explanation of ranking methodology)",
+    "insights": "string (key insights from peer comparison)"
+  }},
+  "chart_data": {{
+    "peer_scores": [{{"constituent": "string", "score": number}}],
+    "ranking_distribution": {{"excellent": number, "good": number, "average": number, "poor": number, "very_poor": number}}
+  }}
+}}
+"""
 
-        # Use get_or_compute_ai_response for stampede protection
         cache_parameters = {"constituency_slug": constituency_slug, "module": "peer_rank"}
         ai_response = get_or_compute_ai_response(
             prompt=prompt,
-            model="claude",
+            model=GROQ_MODEL,
             parameters=cache_parameters,
-            compute_fn=lambda p, m: call_claude_api(p, m)
+            compute_fn=lambda p, m: call_llm_api(p, m)
         )
+
+        if ai_response.get("_error"):
+            return jsonify({"success": False, "module": "peer_rank", "error": ai_response["narrative_fields"]["details"]}), 502
 
         return jsonify({
             "success": True,
@@ -903,53 +795,52 @@ def mp_peer_rank(constituency_slug):
 
     except Exception as e:
         logging.error(f"Error in MP peer rank: {e}")
-        return jsonify({"error": "Internal server error", "details": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
+
 
 @ai_bp.route("/mp/<constituency_slug>/citizen_actions", methods=["GET"])
 def mp_citizen_actions(constituency_slug):
     """AI Citizen Actions Recommender Module for MP/Constituency"""
     try:
-        # Extract data (for validation)
-        data = validate_and_extract_data(constituency_slug)
-        if "error" in data:
-            return jsonify({"error": data["error"]}), 404
+        if not validate_constituency_exists(constituency_slug):
+            return jsonify({"error": f"Constituency not found: {constituency_slug}"}), 404
 
-        # Generate concise summaries
         constituency_summary = generate_constituency_summary(constituency_slug, "citizen_actions")
         governor_summary = generate_governor_summary("citizen_actions")
 
-        # Prepare prompt for Claude
         prompt = f"""
-        Generate recommended actions for citizens for the constituency with slug '{constituency_slug}'.
-        Based on audit findings, financial data, and performance metrics, suggest specific actions citizens can take.
+Generate recommended actions for citizens for the constituency with slug '{constituency_slug}'.
+Based on audit findings, financial data, and performance metrics, suggest specific actions citizens can take.
 
-        Constituency Summary:
-        {constituency_summary}
+Constituency Summary:
+{constituency_summary}
 
-        Governor Summary:
-        {governor_summary}
+Governor Summary:
+{governor_summary}
 
-        Return ONLY a JSON object with exactly this structure:
-        {{
-          "narrative_fields": {{
-            "recommended_actions": "string (detailed recommended actions)",
-            "priority_level": "string (High/Medium/Low priority)"
-          }},
-          "chart_data": {{
-            "action_effectiveness": [{{"action": "string", "effectiveness": number, "cost": number}}],
-            "implementation_timeline": [{{"phase": "string", "duration": number}}]
-          }}
-        }}
-        """
+Return ONLY a JSON object with exactly this structure:
+{{
+  "narrative_fields": {{
+    "recommended_actions": "string (detailed recommended actions)",
+    "priority_level": "string (High/Medium/Low priority)"
+  }},
+  "chart_data": {{
+    "action_effectiveness": [{{"action": "string", "effectiveness": number, "cost": number}}],
+    "implementation_timeline": [{{"phase": "string", "duration": number}}]
+  }}
+}}
+"""
 
-        # Use get_or_compute_ai_response for stampede protection
         cache_parameters = {"constituency_slug": constituency_slug, "module": "citizen_actions"}
         ai_response = get_or_compute_ai_response(
             prompt=prompt,
-            model="claude",
+            model=GROQ_MODEL,
             parameters=cache_parameters,
-            compute_fn=lambda p, m: call_claude_api(p, m)
+            compute_fn=lambda p, m: call_llm_api(p, m)
         )
+
+        if ai_response.get("_error"):
+            return jsonify({"success": False, "module": "citizen_actions", "error": ai_response["narrative_fields"]["details"]}), 502
 
         return jsonify({
             "success": True,
@@ -959,53 +850,52 @@ def mp_citizen_actions(constituency_slug):
 
     except Exception as e:
         logging.error(f"Error in MP citizen actions: {e}")
-        return jsonify({"error": "Internal server error", "details": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
+
 
 @ai_bp.route("/mp/<constituency_slug>/data_sources", methods=["GET"])
 def mp_data_sources(constituency_slug):
     """AI Data Sources Analyzer Module for MP/Constituency"""
     try:
-        # Extract data (for validation)
-        data = validate_and_extract_data(constituency_slug)
-        if "error" in data:
-            return jsonify({"error": data["error"]}), 404
+        if not validate_constituency_exists(constituency_slug):
+            return jsonify({"error": f"Constituency not found: {constituency_slug}"}), 404
 
-        # Generate concise summaries
         constituency_summary = generate_constituency_summary(constituency_slug, "data_sources")
         governor_summary = generate_governor_summary("data_sources")
 
-        # Prepare prompt for Claude
         prompt = f"""
-        Evaluate the data sources and quality for the constituency with slug '{constituency_slug}'.
-        Assess reliability, completeness, and timeliness of the data used for analysis.
+Evaluate the data sources and quality for the constituency with slug '{constituency_slug}'.
+Assess reliability, completeness, and timeliness of the data used for analysis.
 
-        Constituency Summary:
-        {constituency_summary}
+Constituency Summary:
+{constituency_summary}
 
-        Governor Summary:
-        {governor_summary}
+Governor Summary:
+{governor_summary}
 
-        Return ONLY a JSON object with exactly this structure:
-        {{
-          "narrative_fields": {{
-            "data_quality_assessment": "string (overall data quality rating)",
-            "source_reliability": "string (assessment of source reliability)"
-          }},
-          "chart_data": {{
-            "source_scores": [{{"source": "string", "reliability": number, "completeness": number}}],
-            "data_gaps": [{{"gap_type": "string", "severity": number}}]
-          }}
-        }}
-        """
+Return ONLY a JSON object with exactly this structure:
+{{
+  "narrative_fields": {{
+    "data_quality_assessment": "string (overall data quality rating)",
+    "source_reliability": "string (assessment of source reliability)"
+  }},
+  "chart_data": {{
+    "source_scores": [{{"source": "string", "reliability": number, "completeness": number}}],
+    "data_gaps": [{{"gap_type": "string", "severity": number}}]
+  }}
+}}
+"""
 
-        # Use get_or_compute_ai_response for stampede protection
         cache_parameters = {"constituency_slug": constituency_slug, "module": "data_sources"}
         ai_response = get_or_compute_ai_response(
             prompt=prompt,
-            model="claude",
+            model=GROQ_MODEL,
             parameters=cache_parameters,
-            compute_fn=lambda p, m: call_claude_api(p, m)
+            compute_fn=lambda p, m: call_llm_api(p, m)
         )
+
+        if ai_response.get("_error"):
+            return jsonify({"success": False, "module": "data_sources", "error": ai_response["narrative_fields"]["details"]}), 502
 
         return jsonify({
             "success": True,
@@ -1015,17 +905,16 @@ def mp_data_sources(constituency_slug):
 
     except Exception as e:
         logging.error(f"Error in MP data sources: {e}")
-        return jsonify({"error": "Internal server error", "details": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
+
 
 @ai_bp.route("/mp/<constituency_slug>/cached_at", methods=["GET"])
 def mp_cached_at(constituency_slug):
     """AI Cached At Tracker Module for MP/Constituency"""
     try:
-        # Check if we have any cached data for this constituency
         db = get_db()
         cache_collection = db.ai_cache
 
-        # Find the most recent cache entry for this constituency
         latest_cache = cache_collection.find_one(
             {"parameters.constituency_slug": constituency_slug},
             sort=[("created_at", -1)]
@@ -1058,46 +947,48 @@ def mp_cached_at(constituency_slug):
 
     except Exception as e:
         logging.error(f"Error in MP cached at: {e}")
-        return jsonify({"error": "Internal server error", "details": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
+
 
 # Governor AI Modules
 @ai_bp.route("/governor/fiscal_health", methods=["GET"])
 def governor_fiscal_health():
     """AI Fiscal Health Scorer Module for Governor"""
     try:
-        # Generate concise summary for fiscal health analysis
         governor_summary = generate_governor_summary("fiscal_health")
 
         prompt = f"""
-        Analyze the fiscal health of the county government based on financial data, audit findings, and department performance.
-        Assess overall financial stability, sustainability, and performance.
+Analyze the fiscal health of the county government based on financial data, audit findings, and department performance.
+Assess overall financial stability, sustainability, and performance.
 
-        Governor Data Summary:
-        {governor_summary}
+Governor Data Summary:
+{governor_summary}
 
-        Return ONLY a JSON object with exactly this structure:
-        {{
-          "narrative_fields": {{
-            "health_level": "string (e.g., Strong, Moderate, Weak)",
-            "budget_summary": "string (summary of budget performance)",
-            "osr_analysis": "string (Own Source Revenue analysis)"
-          }},
-          "chart_data": {{
-            "health_score": number (0-100 for gauge visualization),
-            "revenue_trend": [{{"fy": "string", "equitable": number, "conditional": number, "osr": number, "health": number}}],
-            "osr_trend": [{{"fy": "string", "target": number, "actual": number}}]
-          }}
-        }}
-        """
+Return ONLY a JSON object with exactly this structure:
+{{
+  "narrative_fields": {{
+    "health_level": "string (e.g., Strong, Moderate, Weak)",
+    "budget_summary": "string (summary of budget performance)",
+    "osr_analysis": "string (Own Source Revenue analysis)"
+  }},
+  "chart_data": {{
+    "health_score": number (0-100 for gauge visualization),
+    "revenue_trend": [{{"fy": "string", "equitable": number, "conditional": number, "osr": number, "health": number}}],
+    "osr_trend": [{{"fy": "string", "target": number, "actual": number}}]
+  }}
+}}
+"""
 
-        # Use get_or_compute_ai_response for stampede protection
         cache_parameters = {"module": "fiscal_health"}
         ai_response = get_or_compute_ai_response(
             prompt=prompt,
-            model="claude",
+            model=GROQ_MODEL,
             parameters=cache_parameters,
-            compute_fn=lambda p, m: call_claude_api(p, m)
+            compute_fn=lambda p, m: call_llm_api(p, m)
         )
+
+        if ai_response.get("_error"):
+            return jsonify({"success": False, "module": "fiscal_health", "error": ai_response["narrative_fields"]["details"]}), 502
 
         return jsonify({
             "success": True,
@@ -1107,43 +998,44 @@ def governor_fiscal_health():
 
     except Exception as e:
         logging.error(f"Error in governor fiscal health: {e}")
-        return jsonify({"error": "Internal server error", "details": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
+
 
 @ai_bp.route("/governor/dept_absorption", methods=["GET"])
 def governor_dept_absorption():
     """AI Dept Absorption Analyst Module for Governor"""
     try:
-        # Generate concise summary for department absorption analysis
         governor_summary = generate_governor_summary("dept_absorption")
 
-        # Prepare prompt for Claude
         prompt = f"""
-        Analyze department budget absorption rates and identify risks.
-        Assess how well departments are utilizing their allocated budgets.
+Analyze department budget absorption rates and identify risks.
+Assess how well departments are utilizing their allocated budgets.
 
-        Governor Data Summary:
-        {governor_summary}
+Governor Data Summary:
+{governor_summary}
 
-        Return ONLY a JSON object with exactly this structure:
-        {{
-          "narrative_fields": {{
-            "risk_flag": "string (overall risk indicator)",
-            "projections": "string (year-end projection explanations)"
-          }},
-          "chart_data": {{
-            "dept_absorption": [{{"name": "string", "pct": number, "risk_level": string}}]
-          }}
-        }}
-        """
+Return ONLY a JSON object with exactly this structure:
+{{
+  "narrative_fields": {{
+    "risk_flag": "string (overall risk indicator)",
+    "projections": "string (year-end projection explanations)"
+  }},
+  "chart_data": {{
+    "dept_absorption": [{{"name": "string", "pct": number, "risk_level": "string"}}]
+  }}
+}}
+"""
 
-        # Use get_or_compute_ai_response for stampede protection
         cache_parameters = {"module": "dept_absorption"}
         ai_response = get_or_compute_ai_response(
             prompt=prompt,
-            model="claude",
+            model=GROQ_MODEL,
             parameters=cache_parameters,
-            compute_fn=lambda p, m: call_claude_api(p, m)
+            compute_fn=lambda p, m: call_llm_api(p, m)
         )
+
+        if ai_response.get("_error"):
+            return jsonify({"success": False, "module": "dept_absorption", "error": ai_response["narrative_fields"]["details"]}), 502
 
         return jsonify({
             "success": True,
@@ -1153,44 +1045,45 @@ def governor_dept_absorption():
 
     except Exception as e:
         logging.error(f"Error in governor dept absorption: {e}")
-        return jsonify({"error": "Internal server error", "details": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
+
 
 @ai_bp.route("/governor/osr_analysis", methods=["GET"])
 def governor_osr_analysis():
     """AI OSR Analyser Module for Governor"""
     try:
-        # Generate concise summary for OSR analysis
         governor_summary = generate_governor_summary("osr_analysis")
 
-        # Prepare prompt for Claude
         prompt = f"""
-        Analyze Own Source Revenue (OSR) performance and trends.
-        Evaluate the county's ability to generate revenue from local sources.
+Analyze Own Source Revenue (OSR) performance and trends.
+Evaluate the county's ability to generate revenue from local sources.
 
-        Governor Data Summary:
-        {governor_summary}
+Governor Data Summary:
+{governor_summary}
 
-        Return ONLY a JSON object with exactly this structure:
-        {{
-          "narrative_fields": {{
-            "osr_performance": "string (assessment of OSR performance)",
-            "trend_analysis": "string (analysis of OSR trends over time)"
-          }},
-          "chart_data": {{
-            "osr_breakdown": [{{"source": "string", "amount": number, "percentage": number}}],
-            "osr_growth": [{{"fy": "string", "growth_rate": number}}]
-          }}
-        }}
-        """
+Return ONLY a JSON object with exactly this structure:
+{{
+  "narrative_fields": {{
+    "osr_performance": "string (assessment of OSR performance)",
+    "trend_analysis": "string (analysis of OSR trends over time)"
+  }},
+  "chart_data": {{
+    "osr_breakdown": [{{"source": "string", "amount": number, "percentage": number}}],
+    "osr_growth": [{{"fy": "string", "growth_rate": number}}]
+  }}
+}}
+"""
 
-        # Use get_or_compute_ai_response for stampede protection
         cache_parameters = {"module": "osr_analysis"}
         ai_response = get_or_compute_ai_response(
             prompt=prompt,
-            model="claude",
+            model=GROQ_MODEL,
             parameters=cache_parameters,
-            compute_fn=lambda p, m: call_claude_api(p, m)
+            compute_fn=lambda p, m: call_llm_api(p, m)
         )
+
+        if ai_response.get("_error"):
+            return jsonify({"success": False, "module": "osr_analysis", "error": ai_response["narrative_fields"]["details"]}), 502
 
         return jsonify({
             "success": True,
@@ -1200,44 +1093,45 @@ def governor_osr_analysis():
 
     except Exception as e:
         logging.error(f"Error in governor osr analysis: {e}")
-        return jsonify({"error": "Internal server error", "details": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
+
 
 @ai_bp.route("/governor/department_flags", methods=["GET"])
 def governor_department_flags():
     """AI Department Flags Module for Governor"""
     try:
-        # Generate concise summary for department flags analysis
         governor_summary = generate_governor_summary("department_flags")
 
-        # Prepare prompt for Claude
         prompt = f"""
-        Identify department-specific risk flags based on budget performance and audit findings.
-        Highlight departments that require attention or intervention.
+Identify department-specific risk flags based on budget performance and audit findings.
+Highlight departments that require attention or intervention.
 
-        Governor Data Summary:
-        {governor_summary}
+Governor Data Summary:
+{governor_summary}
 
-        Return ONLY a JSON object with exactly this structure:
-        {{
-          "narrative_fields": {{
-            "flags_summary": "string (summary of identified flags)",
-            "recommendations": "string (recommended actions for flagged departments)"
-          }},
-          "chart_data": {{
-            "dept_risk_scores": [{{"name": "string", "risk_score": number, "risk_level": string}}],
-            "trend_indicators": [{{"name": "string", "trend": "string", "significance": number}}]
-          }}
-        }}
-        """
+Return ONLY a JSON object with exactly this structure:
+{{
+  "narrative_fields": {{
+    "flags_summary": "string (summary of identified flags)",
+    "recommendations": "string (recommended actions for flagged departments)"
+  }},
+  "chart_data": {{
+    "dept_risk_scores": [{{"name": "string", "risk_score": number, "risk_level": "string"}}],
+    "trend_indicators": [{{"name": "string", "trend": "string", "significance": number}}]
+  }}
+}}
+"""
 
-        # Use get_or_compute_ai_response for stampede protection
         cache_parameters = {"module": "department_flags"}
         ai_response = get_or_compute_ai_response(
             prompt=prompt,
-            model="claude",
+            model=GROQ_MODEL,
             parameters=cache_parameters,
-            compute_fn=lambda p, m: call_claude_api(p, m)
+            compute_fn=lambda p, m: call_llm_api(p, m)
         )
+
+        if ai_response.get("_error"):
+            return jsonify({"success": False, "module": "department_flags", "error": ai_response["narrative_fields"]["details"]}), 502
 
         return jsonify({
             "success": True,
@@ -1247,44 +1141,45 @@ def governor_department_flags():
 
     except Exception as e:
         logging.error(f"Error in governor department flags: {e}")
-        return jsonify({"error": "Internal server error", "details": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
+
 
 @ai_bp.route("/governor/top_risks", methods=["GET"])
 def governor_top_risks():
     """AI Top Risks & Citizen Actions Module for Governor"""
     try:
-        # Generate concise summary for top risks analysis
         governor_summary = generate_governor_summary("top_risks")
 
-        # Prepare prompt for Claude
         prompt = f"""
-        Identify the top risks facing the county government and recommend citizen actions.
-        Assess financial, operational, and governance risks that could impact service delivery.
+Identify the top risks facing the county government and recommend citizen actions.
+Assess financial, operational, and governance risks that could impact service delivery.
 
-        Governor Data Summary:
-        {governor_summary}
+Governor Data Summary:
+{governor_summary}
 
-        Return ONLY a JSON object with exactly this structure:
-        {{
-          "narrative_fields": {{
-            "top_risks": "string (description of top risks)",
-            "citizen_guidance": "string (guidance for citizen engagement)"
-          }},
-          "chart_data": {{
-            "risk_matrix": [{{"risk": "string", "impact": number, "likelihood": number}}],
-            "action_impact": [{{"action": "string", "impact": number, "feasibility": number}}]
-          }}
-        }}
-        """
+Return ONLY a JSON object with exactly this structure:
+{{
+  "narrative_fields": {{
+    "top_risks": "string (description of top risks)",
+    "citizen_guidance": "string (guidance for citizen engagement)"
+  }},
+  "chart_data": {{
+    "risk_matrix": [{{"risk": "string", "impact": number, "likelihood": number}}],
+    "action_impact": [{{"action": "string", "impact": number, "feasibility": number}}]
+  }}
+}}
+"""
 
-        # Use get_or_compute_ai_response for stampede protection
         cache_parameters = {"module": "top_risks"}
         ai_response = get_or_compute_ai_response(
             prompt=prompt,
-            model="claude",
+            model=GROQ_MODEL,
             parameters=cache_parameters,
-            compute_fn=lambda p, m: call_claude_api(p, m)
+            compute_fn=lambda p, m: call_llm_api(p, m)
         )
+
+        if ai_response.get("_error"):
+            return jsonify({"success": False, "module": "top_risks", "error": ai_response["narrative_fields"]["details"]}), 502
 
         return jsonify({
             "success": True,
@@ -1294,17 +1189,16 @@ def governor_top_risks():
 
     except Exception as e:
         logging.error(f"Error in governor top risks: {e}")
-        return jsonify({"error": "Internal server error", "details": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
+
 
 # County-Level Modules
 @ai_bp.route("/county/narrative", methods=["GET"])
 def county_narrative():
     """AI County Narrative Generator Module"""
     try:
-        # Generate concise summaries
         governor_summary = generate_governor_summary("county_narrative")
 
-        # Get aggregated constituency summary
         db = get_db()
         all_constituencies = list(db.constituencies.find({}))
         const_summaries = []
@@ -1317,39 +1211,40 @@ def county_narrative():
 
         constituency_summary = "\n".join(const_summaries)
 
-        # Prepare prompt for Claude
         prompt = f"""
-        Generate a comprehensive county narrative covering both MP (NG-CDF) and Governor (county executive) perspectives.
-        Include analysis of cross-leader relationships, shared risks, and collaborative opportunities.
+Generate a comprehensive county narrative covering both MP (NG-CDF) and Governor (county executive) perspectives.
+Include analysis of cross-leader relationships, shared risks, and collaborative opportunities.
 
-        Governor Data Summary:
-        {governor_summary}
+Governor Data Summary:
+{governor_summary}
 
-        Constituency Data Summary:
-        {constituency_summary}
+Constituency Data Summary:
+{constituency_summary}
 
-        Return ONLY a JSON object with exactly this structure:
-        {{
-          "narrative_fields": {{
-            "mp_paragraph": "string (NG-CDF/MP perspective narrative)",
-            "governor_paragraph": "string (county executive perspective narrative)",
-            "county_health_score": number (0-100 for doughnut gauge visualization)
-          }},
-          "chart_data": {{
-            "cross_leader_anomalies": [{{"type": "string", "description": "string", "severity": number}}],
-            "constituency_risk_scores": [{{"name": "string", "score": number}}]
-          }}
-        }}
-        """
+Return ONLY a JSON object with exactly this structure:
+{{
+  "narrative_fields": {{
+    "mp_paragraph": "string (NG-CDF/MP perspective narrative)",
+    "governor_paragraph": "string (county executive perspective narrative)",
+    "county_health_score": number (0-100 for doughnut gauge visualization)
+  }},
+  "chart_data": {{
+    "cross_leader_anomalies": [{{"type": "string", "description": "string", "severity": number}}],
+    "constituency_risk_scores": [{{"name": "string", "score": number}}]
+  }}
+}}
+"""
 
-        # Use get_or_compute_ai_response for stampede protection
         cache_parameters = {"module": "county_narrative"}
         ai_response = get_or_compute_ai_response(
             prompt=prompt,
-            model="claude",
+            model=GROQ_MODEL,
             parameters=cache_parameters,
-            compute_fn=lambda p, m: call_claude_api(p, m)
+            compute_fn=lambda p, m: call_llm_api(p, m)
         )
+
+        if ai_response.get("_error"):
+            return jsonify({"success": False, "module": "county_narrative", "error": ai_response["narrative_fields"]["details"]}), 502
 
         return jsonify({
             "success": True,
@@ -1359,134 +1254,138 @@ def county_narrative():
 
     except Exception as e:
         logging.error(f"Error in county narrative: {e}")
-        return jsonify({"error": "Internal server error", "details": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
+
 
 # Finding Classifier Module
 @ai_bp.route("/findings/classifier", methods=["POST"])
 def findings_classifier():
     """AI Finding Classifier Module"""
     try:
-        # Get request data
         request_data = request.get_json(silent=True) or {}
         finding_id = request_data.get("finding_id")
         finding_text = request_data.get("finding_text")
 
-        # Extract data (governor-wide findings analysis)
-        data = validate_and_extract_data()  # No constituency slug for analysis of all findings
-        if "error" in data:
-            return jsonify({"error": data["error"]}), 404
+        # Extract governor summary only (lightweight)
+        governor_summary = generate_governor_summary("finding_classifier")
 
-        # Prepare prompt for Claude
-        prompt = """
-        Classify and analyze audit findings from both MP (NG-CDF) and Governor (county executive) sources.
-        Categorize by severity, provide plain English summaries, and recommend actions.
+        prompt = f"""
+Classify and analyze audit findings from both MP (NG-CDF) and Governor (county executive) sources.
+Categorize by severity, provide plain English summaries, and recommend actions.
 
-        Focus on the following finding: {finding_context}
+Focus on the following finding: {finding_text or finding_id or "all audit findings"}
 
-        Governor Data: {governor_data}
+Governor Data Summary:
+{governor_summary}
 
-        Return ONLY a JSON object with exactly this structure:
-        {{
-          "narrative_fields": {{
-            "severity": "string (High/Medium/Low overall severity)",
-            "plain_english_summary": "string (accessible summary of findings)",
-            "recommended_action": "string (recommended course of action)"
-          }},
-          "chart_data": {{
-            "severity_counts": {{"high": number, "medium": number, "low": number}},
-            "findings_by_constituency": [{{"name": "string", "count": number}}]
-          }}
-        }}
-        """.format(
-            finding_context=finding_text or finding_id or "all audit findings",
-            governor_data=json.dumps(data.get('governor', {}), default=str)
-        )
+Return ONLY a JSON object with exactly this structure:
+{{
+  "narrative_fields": {{
+    "severity": "string (High/Medium/Low overall severity)",
+    "plain_english_summary": "string (accessible summary of findings)",
+    "recommended_action": "string (recommended course of action)"
+  }},
+  "chart_data": {{
+    "severity_counts": {{"high": number, "medium": number, "low": number}},
+    "findings_by_constituency": [{{"name": "string", "count": number}}]
+  }}
+}}
+"""
 
-        # Use get_or_compute_ai_response for stampede protection (only if we have specific identifiers for caching)
         cache_parameters = {
             "module": "finding_classifier",
             "finding_id": finding_id,
             "finding_text": finding_text
         }
 
+        was_cached = False
         if finding_id or finding_text:
+            cached = get_cached_ai_response(prompt, GROQ_MODEL, cache_parameters)
+            if cached is not None:
+                was_cached = True
             ai_response = get_or_compute_ai_response(
                 prompt=prompt,
-                model="claude",
+                model=GROQ_MODEL,
                 parameters=cache_parameters,
-                compute_fn=lambda p, m: call_claude_api(p, m)
+                compute_fn=lambda p, m: call_llm_api(p, m)
             )
-            cached = True
         else:
             # No caching for generic "all findings" request
-            ai_response = call_claude_api(prompt)
-            cached = False
+            ai_response = call_llm_api(prompt)
+
+        if ai_response.get("_error"):
+            return jsonify({"success": False, "module": "finding_classifier", "error": ai_response["narrative_fields"]["details"]}), 502
 
         return jsonify({
             "success": True,
             "module": "finding_classifier",
-            "cached": cached,
+            "cached": was_cached,
             "data": ai_response
         })
 
     except Exception as e:
         logging.error(f"Error in findings classifier: {e}")
-        return jsonify({"error": "Internal server error", "details": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
+
 
 # Cross-Leader Comparator Module
 @ai_bp.route("/compare", methods=["POST"])
 def compare_leaders():
     """AI Cross-Leader Comparator Module"""
     try:
-        # Get request data
         request_data = request.get_json(silent=True) or {}
-        leader1_type = request_data.get("leader1_type", "governor")  # governor or constituency
-        leader1_id = request_data.get("leader1_id")  # governor name or constituency slug
-        leader2_type = request_data.get("leader2_type", "constituency")  # governor or constituency
-        leader2_id = request_data.get("leader2_id")  # governor name or constituency slug
+        leader1_type = request_data.get("leader1_type", "governor")
+        leader1_id = request_data.get("leader1_id")
+        leader2_type = request_data.get("leader2_type", "constituency")
+        leader2_id = request_data.get("leader2_id")
 
-        # Extract data
-        data = validate_and_extract_data(leader1_id if leader1_type == "constituency" else None)
-        # Also get data for second leader if it's a constituency
+        # Extract data using summaries only (not raw JSON)
+        data1 = validate_and_extract_data(leader1_id if leader1_type == "constituency" else None)
+        if "error" in data1:
+            return jsonify({"error": data1["error"]}), 404
+
         data2 = {}
         if leader2_type == "constituency" and leader2_id:
             data2 = validate_and_extract_data(leader2_id)
             if "error" in data2:
                 return jsonify({"error": data2["error"]}), 404
+        elif leader2_type == "governor":
+            # Governor data is always in data1 when leader1 is governor or we need it from data1
+            data2 = data1
 
-        if "error" in data:
-            return jsonify({"error": data["error"]}), 404
+        # Generate concise summaries instead of dumping raw JSON
+        def get_leader_summary(data, leader_type, leader_id):
+            if leader_type == "constituency":
+                return generate_constituency_summary(leader_id, "compare")
+            else:
+                return generate_governor_summary("compare")
 
-        # Prepare prompt for Claude
-        prompt = """
-        Compare MP (NG-CDF legislative) and Governor (county executive) performance across multiple dimensions.
-        Analyze allocation effectiveness, audit outcomes, correct appropriations, budget absorption, and fiscal health.
+        leader1_summary = get_leader_summary(data1, leader1_type, leader1_id)
+        leader2_summary = get_leader_summary(data2, leader2_type, leader2_id)
 
-        Leader 1 ({leader1_type}): {leader1_data}
-        Leader 2 ({leader2_type}): {leader2_data}
+        prompt = f"""
+Compare MP (NG-CDF legislative) and Governor (county executive) performance across multiple dimensions.
+Analyze allocation effectiveness, audit outcomes, correct appropriations, budget absorption, and fiscal health.
 
-        Return ONLY a JSON object with exactly this structure:
-        {{
-          "narrative_fields": {{
-            "comparative_analysis": "string (detailed comparison analysis)",
-            "stronger_track": "string (which track performs better overall)",
-            "reasoning": "string (explanation of reasoning behind assessment)"
-          }},
-          "chart_data": {{
-            "radar_data": {{
-              "mp_track": {{"allocation": number, "audit_findings": number, "correct_appropriations": number, "absorption_rate": number, "fiscal_health": number}},
-              "governor_track": {{"allocation": number, "audit_findings": number, "correct_appropriations": number, "absorption_rate": number, "fiscal_health": number}}
-            }}
-          }}
-        }}
-        """.format(
-            leader1_type=leader1_type,
-            leader1_data=json.dumps(data.get('constituency' if leader1_type == 'constituency' else 'governor', {}), default=str) if (leader1_type == 'constituency' and data.get('constituency')) or (leader1_type == 'governor' and data.get('governor')) else "{}",
-            leader2_type=leader2_type,
-            leader2_data=json.dumps(data2.get('constituency' if leader2_type == 'constituency' else 'governor', {}), default=str) if (leader2_type == 'constituency' and data2.get('constituency')) or (leader2_type == 'governor' and data2.get('governor')) else "{}"
-        )
+Leader 1 ({leader1_type}): {leader1_summary}
+Leader 2 ({leader2_type}): {leader2_summary}
 
-        # Use get_or_compute_ai_response for stampede protection
+Return ONLY a JSON object with exactly this structure:
+{{
+  "narrative_fields": {{
+    "comparative_analysis": "string (detailed comparison analysis)",
+    "stronger_track": "string (which track performs better overall)",
+    "reasoning": "string (explanation of reasoning behind assessment)"
+  }},
+  "chart_data": {{
+    "radar_data": {{
+      "mp_track": {{"allocation": number, "audit_findings": number, "correct_appropriations": number, "absorption_rate": number, "fiscal_health": number}},
+      "governor_track": {{"allocation": number, "audit_findings": number, "correct_appropriations": number, "absorption_rate": number, "fiscal_health": number}}
+    }}
+  }}
+}}
+"""
+
         cache_parameters = {
             "module": "compare",
             "leader1_type": leader1_type,
@@ -1497,10 +1396,13 @@ def compare_leaders():
 
         ai_response = get_or_compute_ai_response(
             prompt=prompt,
-            model="claude",
+            model=GROQ_MODEL,
             parameters=cache_parameters,
-            compute_fn=lambda p, m: call_claude_api(p, m)
+            compute_fn=lambda p, m: call_llm_api(p, m)
         )
+
+        if ai_response.get("_error"):
+            return jsonify({"success": False, "module": "compare", "error": ai_response["narrative_fields"]["details"]}), 502
 
         return jsonify({
             "success": True,
@@ -1510,28 +1412,26 @@ def compare_leaders():
 
     except Exception as e:
         logging.error(f"Error in compare leaders: {e}")
-        return jsonify({"error": "Internal server error", "details": str(e)}), 500
+        return jsonify({"error": "Internal server error"}), 500
+
 
 # Health check endpoint for AI engine
 @ai_bp.route("/health", methods=["GET"])
 def ai_health():
     """Health check for AI engine"""
     try:
-        # Test database connection
         db = get_db()
-        # Try to access the ai_cache collection
         collection = db.ai_cache
-        # This will throw an exception if there's a problem
         collection.find_one({})
 
         return jsonify({
             "status": "healthy",
             "service": "AI Engine",
-            "timestamp": datetime.utcnow().isoformat()
+            "timestamp": datetime.now(timezone.utc).isoformat()
         })
     except Exception as e:
+        logging.error(f"AI health check failed: {e}")
         return jsonify({
             "status": "unhealthy",
-            "service": "AI Engine",
-            "error": str(e)
+            "service": "AI Engine"
         }), 503
