@@ -18,7 +18,7 @@ ai_bp = Blueprint("ai", __name__)
 AI_CACHE_TTL_HOURS = int(os.getenv("AI_CACHE_TTL_HOURS", "24"))
 DISABLE_AI_CACHE = os.getenv("DISABLE_AI_CACHE", "false").lower() == "true"
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 
 # In-memory locks for cache keys (prevents thundering herd)
 # For multi-worker deployments, consider using Redis or MongoDB-based locks
