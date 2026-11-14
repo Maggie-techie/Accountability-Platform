@@ -194,9 +194,28 @@ def get_or_compute_ai_response(prompt: str, model: str, parameters: dict, comput
 
 def call_llm_api(prompt: str, model: str = None) -> dict:
     """
-    Call Groq API to get analysis.
+    Call Groq API to get structured JSON analysis.
     Uses the Groq API key and model from environment.
     Includes retry logic with exponential backoff for rate limits (429).
+    """
+    return _call_llm_api_internal(prompt, model, json_mode=True)
+
+
+def call_llm_api_text(prompt: str, model: str = None) -> dict:
+    """
+    Call Groq API to get plain text response (for conversational AI).
+    Uses the Groq API key and model from environment.
+    Includes retry logic with exponential backoff for rate limits (429).
+    Returns dict with 'response' key containing the text.
+    """
+    return _call_llm_api_internal(prompt, model, json_mode=False)
+
+
+def _call_llm_api_internal(prompt: str, model: str = None, json_mode: bool = True) -> dict:
+    """
+    Internal function to call Groq API.
+    json_mode=True: forces JSON output, parses and returns dict
+    json_mode=False: returns plain text in 'response' key
     """
     if model is None:
         model = GROQ_MODEL
@@ -223,8 +242,10 @@ def call_llm_api(prompt: str, model: str = None) -> dict:
         ],
         "temperature": 0.2,
         "max_tokens": 8000,
-        "response_format": {"type": "json_object"}
     }
+
+    if json_mode:
+        payload["response_format"] = {"type": "json_object"}
 
     # Retry logic with exponential backoff for rate limits
     max_retries = 3
@@ -265,15 +286,19 @@ def call_llm_api(prompt: str, model: str = None) -> dict:
                 content = message.get("content", "")
                 finish_reason = result["choices"][0].get("finish_reason")
 
-                # Try to parse the content as JSON
-                try:
-                    parsed = json.loads(content)
-                    return parsed
-                except json.JSONDecodeError as e:
-                    logging.error(f"Failed to parse Groq response as JSON: {e}")
-                    logging.error(f"Finish reason: {finish_reason}")
-                    logging.error(f"Response content: {content[:500]}")
-                    return _error("Failed to parse Groq response", "Groq API returned invalid JSON")
+                if json_mode:
+                    # Try to parse the content as JSON
+                    try:
+                        parsed = json.loads(content)
+                        return parsed
+                    except json.JSONDecodeError as e:
+                        logging.error(f"Failed to parse Groq response as JSON: {e}")
+                        logging.error(f"Finish reason: {finish_reason}")
+                        logging.error(f"Response content: {content[:500]}")
+                        return _error("Failed to parse Groq response", "Groq API returned invalid JSON")
+                else:
+                    # Return plain text response
+                    return {"response": content}
             else:
                 logging.error("No choices in Groq API response")
                 return _error("Empty response from Groq API", "The Groq API returned no choices")
@@ -1587,6 +1612,305 @@ NOTE: stronger_track must be MP or Governor. chart_data is computed server-side 
     except Exception as e:
         logging.error(f"Error in compare leaders: {e}")
         return jsonify({"error": "Internal server error"}), 500
+
+
+# ============================================================
+# Conversational AI Assistant with RAG (Retrieval-Augmented Generation)
+# ============================================================
+
+def retrieve_relevant_data(query: str, constituency_slug: str = None) -> dict:
+    """
+    Retrieve relevant data from MongoDB based on user query.
+    Uses keyword matching to determine what data to fetch.
+    """
+    db = get_db()
+    query_lower = query.lower()
+
+    # Determine what data to fetch based on query keywords
+    data = {}
+
+    # Financial/budget keywords
+    financial_keywords = ['budget', 'allocation', 'expenditure', 'spending', 'revenue', 'osr', 'absorption', 'financial', 'money', 'fund', 'cost', 'amount', 'kes', 'billion', 'million']
+    # Audit/findings keywords
+    audit_keywords = ['audit', 'finding', 'irregular', 'misappropriat', 'anomal', 'flag', 'risk', 'query', 'issue', 'problem']
+    # Leader keywords
+    leader_keywords = ['governor', 'mp', 'member of parliament', 'leader', 'mutahi', 'kahiga', 'mp ', 'constituency', 'ward']
+    # Project/development keywords
+    project_keywords = ['project', 'development', 'infrastructure', 'road', 'water', 'hospital', 'school', 'construction', 'stall', 'complete']
+    # General constituency keywords
+    constituency_keywords = ['constituenc', 'ward', 'subcounty', 'sub-county', 'nyeri', 'mathira', 'tetu', 'kieni', 'mukurweini', 'othaya']
+
+    needs_financial = any(kw in query_lower for kw in financial_keywords)
+    needs_audit = any(kw in query_lower for kw in audit_keywords)
+    needs_leader = any(kw in query_lower for kw in leader_keywords)
+    needs_project = any(kw in query_lower for kw in project_keywords)
+    needs_constituency = any(kw in query_lower for kw in constituency_keywords) or constituency_slug
+
+    # Default to fetching if no specific keywords (broad question)
+    if not (needs_financial or needs_audit or needs_leader or needs_project or needs_constituency):
+        needs_financial = needs_audit = needs_leader = needs_constituency = True
+
+    try:
+        # Get governor/county data
+        if needs_leader or needs_financial or needs_audit or needs_constituency:
+            governor = db.county_leaders.find_one({}, {
+                "_id": 0,
+                "name": 1,
+                "title": 1,
+                "party": 1,
+                "financial_data": 1,
+                "audit_findings": 1,
+                "departments": 1,
+                "osr_data": 1,
+                "debt_data": 1,
+                "projects": 1
+            })
+            if governor:
+                data['governor'] = governor
+
+        # Get constituency data if relevant
+        if needs_constituency:
+            if constituency_slug:
+                constituency = db.constituencies.find_one({"slug": constituency_slug}, {"_id": 0})
+                if constituency:
+                    data['constituency'] = constituency
+            else:
+                # Get all constituencies for broad queries
+                constituencies = list(db.constituencies.find({}, {"_id": 0}).limit(8))
+                if constituencies:
+                    data['constituencies'] = constituencies
+
+        # Get MP/NG-CDF data if leader query
+        if needs_leader:
+            mps = list(db.mps.find({}, {"_id": 0}).limit(8))
+            if mps:
+                data['mps'] = mps
+
+        # Get financial data if financial query
+        if needs_financial:
+            financial = db.financial_data.find_one({}, {"_id": 0})
+            if financial:
+                data['financial_data'] = financial
+
+        # Get audit findings if audit query
+        if needs_audit:
+            # Get findings from governor data
+            if data.get('governor', {}).get('audit_findings'):
+                data['audit_findings'] = data['governor']['audit_findings'][:20]  # Limit to 20
+            # Also get from audit_findings collection if exists
+            audit_collection = db.audit_findings
+            if audit_collection.count_documents({}) > 0:
+                additional_findings = list(audit_collection.find({}, {"_id": 0}).limit(10))
+                if additional_findings:
+                    data['audit_findings'] = (data.get('audit_findings', []) + additional_findings)[:30]
+
+        # Get project data if project query
+        if needs_project:
+            projects = list(db.projects.find({}, {"_id": 0}).limit(15))
+            if projects:
+                data['projects'] = projects
+
+        # Get department data
+        if needs_financial or needs_leader:
+            depts = list(db.departments.find({}, {"_id": 0}).limit(15))
+            if depts:
+                data['departments'] = depts
+
+    except Exception as e:
+        logging.error(f"Error retrieving data for RAG: {e}")
+
+    return data
+
+
+def build_conversational_prompt(user_message: str, conversation_history: list, retrieved_data: dict) -> str:
+    """
+    Build a grounded prompt for conversational AI with retrieved data as context.
+    """
+    # Format conversation history
+    history_str = ""
+    if conversation_history:
+        for msg in conversation_history[-6:]:  # Last 6 messages (3 exchanges)
+            role = msg.get('role', 'user')
+            content = msg.get('content', '')
+            history_str += f"{role.capitalize()}: {content}\n"
+
+    # Format retrieved data as context
+    context_parts = []
+
+    if retrieved_data.get('governor'):
+        gov = retrieved_data['governor']
+        context_parts.append(f"=== GOVERNOR / COUNTY EXECUTIVE ===\n"
+            f"Name: {gov.get('name', 'N/A')}\n"
+            f"Title: {gov.get('title', 'Governor')}\n"
+            f"Party: {gov.get('party', 'N/A')}\n")
+
+        if gov.get('financial_data'):
+            fd = gov['financial_data']
+            context_parts.append(f"Financial Data: Revenue KES {fd.get('total_revenue', 'N/A'):,}, "
+                f"Expenditure KES {fd.get('total_expenditure', 'N/A'):,}, "
+                f"OSR KES {fd.get('osr', 'N/A'):,}, "
+                f"Absorption Rate: {fd.get('absorption_rate', 'N/A')}%")
+
+        if gov.get('audit_findings'):
+            findings = gov['audit_findings'][:5]
+            context_parts.append(f"Recent Audit Findings ({len(findings)} shown):")
+            for f in findings:
+                context_parts.append(f"  - {f.get('title', 'Finding')}: {f.get('description', '')[:150]} "
+                    f"(Severity: {f.get('severity', 'N/A')}, Amount: {f.get('amount_at_risk', 'N/A')})")
+
+    if retrieved_data.get('constituency'):
+        const = retrieved_data['constituency']
+        context_parts.append(f"\n=== CONSTITUENCY: {const.get('name', 'N/A')} ===\n"
+            f"MP: {const.get('mp_name', 'N/A')}\n"
+            f"County: {const.get('county', 'Nyeri')}\n"
+            f"Population: {const.get('population', 'N/A')}")
+        if const.get('ng_cdf_allocations'):
+            context_parts.append(f"NG-CDF Allocations: {const['ng_cdf_allocations']}")
+
+    if retrieved_data.get('constituencies'):
+        context_parts.append(f"\n=== ALL CONSTITUENCIES ({len(retrieved_data['constituencies'])}) ===")
+        for c in retrieved_data['constituencies'][:5]:
+            context_parts.append(f"  - {c.get('name', 'N/A')}: MP {c.get('mp_name', 'N/A')}")
+
+    if retrieved_data.get('mps'):
+        context_parts.append(f"\n=== MEMBERS OF PARLIAMENT ({len(retrieved_data['mps'])}) ===")
+        for mp in retrieved_data['mps'][:5]:
+            context_parts.append(f"  - {mp.get('name', 'N/A')}: {mp.get('constituency', 'N/A')}")
+
+    if retrieved_data.get('audit_findings'):
+        findings = retrieved_data['audit_findings'][:10]
+        context_parts.append(f"\n=== AUDIT FINDINGS ({len(findings)} shown) ===")
+        for f in findings:
+            context_parts.append(f"  - {f.get('title', 'Finding')}: {f.get('description', '')[:200]} "
+                f"(Entity: {f.get('entity', 'N/A')}, Severity: {f.get('severity', 'N/A')})")
+
+    if retrieved_data.get('projects'):
+        projs = retrieved_data['projects'][:10]
+        context_parts.append(f"\n=== PROJECTS ({len(projs)} shown) ===")
+        for p in projs:
+            context_parts.append(f"  - {p.get('name', 'N/A')}: {p.get('status', 'N/A')}, "
+                f"Budget: KES {p.get('budget', 'N/A'):,}, Location: {p.get('location', 'N/A')}")
+
+    if retrieved_data.get('departments'):
+        depts = retrieved_data['departments'][:10]
+        context_parts.append(f"\n=== DEPARTMENTS ({len(depts)} shown) ===")
+        for d in depts:
+            context_parts.append(f"  - {d.get('name', 'N/A')}: Absorption {d.get('absorption_rate', 'N/A')}%, "
+                f"Budget: KES {d.get('budget', 'N/A'):,}")
+
+    context_str = "\n".join(context_parts) if context_parts else "No specific data retrieved."
+
+    # Build the full prompt
+    prompt = f"""You are the Nyeri Accountability Platform AI Assistant. You help citizens understand Nyeri County's public finances, audit findings, and leader performance.
+
+Your role:
+- Answer questions in plain, accessible English (Kiswahili/English mix is fine)
+- Ground ALL claims in the provided data context
+- If data doesn't support an answer, say "I don't have data on that" rather than guessing
+- Cite specific figures, findings, or sources from the context
+- Be conversational but factual - like a knowledgeable civic educator
+- Never fabricate numbers, findings, or quotes
+
+CONTEXT DATA FROM DATABASE:
+{context_str}
+
+CONVERSATION HISTORY:
+{history_str if history_str else "(No prior conversation)"}
+
+CURRENT QUESTION:
+User: {user_message}
+
+INSTRUCTIONS:
+Answer the user's question conversationally using ONLY the context data above.
+If the context doesn't contain enough information, say so and suggest what data might help.
+Keep responses concise (3-6 sentences typically) but informative.
+Use a helpful, civic-education tone - not bureaucratic or academic.
+
+Response:"""
+
+    return prompt
+
+
+@ai_bp.route("/assistant", methods=["POST"])
+def ai_assistant():
+    """
+    Conversational AI Assistant endpoint with RAG.
+    Accepts user message and optional conversation history, returns grounded response.
+
+    Request body:
+    {
+        "message": "string - user's question",
+        "history": [{"role": "user|assistant", "content": "string"}, ...] - optional,
+        "constituency_slug": "string" - optional, for constituency-specific context
+    }
+
+    Response:
+    {
+        "success": true,
+        "response": "string - AI response",
+        "sources_used": ["list of data sources referenced"],
+        "constituency_slug": "string or null"
+    }
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"success": False, "error": "No JSON data provided"}), 400
+
+        user_message = data.get("message", "").strip()
+        if not user_message:
+            return jsonify({"success": False, "error": "Message is required"}), 400
+
+        conversation_history = data.get("history", [])
+        constituency_slug = data.get("constituency_slug")
+
+        # Retrieve relevant data based on query
+        retrieved_data = retrieve_relevant_data(user_message, constituency_slug)
+
+        # Build grounded prompt
+        prompt = build_conversational_prompt(user_message, conversation_history, retrieved_data)
+
+        # Call LLM (text mode for conversational response)
+        ai_response = call_llm_api_text(prompt)
+
+        # Extract response text (handle both error and success cases)
+        if ai_response.get("_error"):
+            return jsonify({
+                "success": False,
+                "error": ai_response.get("narrative_fields", {}).get("details", "AI processing failed")
+            }), 502
+
+        response_text = ai_response.get("response", "")
+
+        # Track which data sources were used
+        sources_used = []
+        if retrieved_data.get('governor'):
+            sources_used.append("governor/county executive data")
+        if retrieved_data.get('constituency'):
+            sources_used.append(f"constituency data ({constituency_slug or 'specific'})")
+        if retrieved_data.get('constituencies'):
+            sources_used.append("all constituencies summary")
+        if retrieved_data.get('mps'):
+            sources_used.append("MP/NG-CDF data")
+        if retrieved_data.get('audit_findings'):
+            sources_used.append("audit findings")
+        if retrieved_data.get('projects'):
+            sources_used.append("project data")
+        if retrieved_data.get('departments'):
+            sources_used.append("department performance data")
+        if retrieved_data.get('financial_data'):
+            sources_used.append("county financial data")
+
+        return jsonify({
+            "success": True,
+            "response": response_text,
+            "sources_used": sources_used,
+            "constituency_slug": constituency_slug
+        })
+
+    except Exception as e:
+        logging.error(f"Error in AI assistant: {e}")
+        return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
 # Health check endpoint for AI engine
