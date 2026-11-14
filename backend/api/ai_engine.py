@@ -6,6 +6,8 @@ import json
 import logging
 import os
 import requests
+import time
+import threading
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -15,7 +17,19 @@ ai_bp = Blueprint("ai", __name__)
 # AI Cache configuration
 AI_CACHE_TTL_HOURS = int(os.getenv("AI_CACHE_TTL_HOURS", "24"))
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-GROQ_MODEL = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.1-70b-versatile")
+
+# In-memory locks for cache keys (prevents thundering herd)
+# For multi-worker deployments, consider using Redis or MongoDB-based locks
+_cache_locks = {}
+_locks_lock = threading.Lock()
+
+def get_cache_lock(cache_key: str) -> threading.Lock:
+    """Get or create a lock for a specific cache key."""
+    with _locks_lock:
+        if cache_key not in _cache_locks:
+            _cache_locks[cache_key] = threading.Lock()
+        return _cache_locks[cache_key]
 
 def get_ai_cache_collection():
     """Get or create the AI cache collection, reusing the connection."""
@@ -100,14 +114,73 @@ def get_cached_ai_response(prompt: str, model: str, parameters: dict) -> dict | 
         logging.error(f"Failed to retrieve cached AI response: {e}")
         return None
 
+
+def get_or_compute_ai_response(prompt: str, model: str, parameters: dict, compute_fn, ttl_hours: int = AI_CACHE_TTL_HOURS) -> dict:
+    """
+    Get cached response or compute and cache it with stampede protection.
+
+    This prevents the thundering herd problem where multiple concurrent requests
+    for the same cache key all miss the cache and hit the API simultaneously.
+
+    Args:
+        prompt: The prompt for the AI
+        model: The model to use
+        parameters: Cache parameters (used for cache key)
+        compute_fn: Function to call to compute the response (e.g., call_claude_api)
+        ttl_hours: Cache TTL in hours
+
+    Returns:
+        The AI response (from cache or freshly computed)
+    """
+    cache_key = generate_cache_key(prompt, model, parameters)
+    lock = get_cache_lock(cache_key)
+
+    # Try to get from cache first (fast path)
+    cached = get_cached_ai_response(prompt, model, parameters)
+    if cached is not None:
+        return cached
+
+    # Cache miss - acquire lock to prevent stampede
+    acquired = lock.acquire(timeout=30)  # Wait up to 30s for lock
+    if not acquired:
+        logging.warning(f"Could not acquire lock for cache key {cache_key[:16]}, proceeding without lock")
+        # Fallback: try cache again, then compute if still missing
+        cached = get_cached_ai_response(prompt, model, parameters)
+        if cached is not None:
+            return cached
+    else:
+        try:
+            # Double-check cache after acquiring lock (another request may have populated it)
+            cached = get_cached_ai_response(prompt, model, parameters)
+            if cached is not None:
+                return cached
+        finally:
+            # We don't release here - we'll release after computing
+            pass
+
+    try:
+        # Compute the response
+        logging.info(f"Computing AI response for cache key: {cache_key[:16]}...")
+        response = compute_fn(prompt, model)
+
+        # Cache the response
+        cache_ai_response(prompt, model, parameters, response, ttl_hours)
+
+        return response
+    finally:
+        # Always release the lock
+        if acquired:
+            lock.release()
+
 def call_claude_api(prompt: str, model: str = None) -> dict:
     """
     Call Groq API to get analysis.
     Uses the Groq API key and model from environment.
+    Includes retry logic with exponential backoff for rate limits (429).
     """
     # If model is not provided, use the default from environment
     if model is None:
-        model = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
+        model = os.getenv("GROQ_MODEL", "llama-3.1-70b-versatile")
 
     # Check if API key is set
     api_key = os.getenv("GROQ_API_KEY")
@@ -146,9 +219,44 @@ def call_claude_api(prompt: str, model: str = None) -> dict:
         "response_format": {"type": "json_object"}
     }
 
-    try:
-        response = requests.post(url, headers=headers, json=payload, timeout=60)
-        response.raise_for_status()  # Raise an exception for bad status codes
+    # Retry logic with exponential backoff for rate limits
+    max_retries = 3
+    base_delay = 2  # seconds
+
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(url, headers=headers, json=payload, timeout=60)
+
+            # Handle rate limiting (429) with retry
+            if response.status_code == 429:
+                if attempt < max_retries - 1:
+                    # Extract retry-after header if present
+                    retry_after = response.headers.get('retry-after')
+                    if retry_after:
+                        try:
+                            delay = int(retry_after)
+                        except ValueError:
+                            delay = base_delay * (2 ** attempt)
+                    else:
+                        delay = base_delay * (2 ** attempt)
+
+                    logging.warning(f"Rate limited (429). Retrying in {delay}s (attempt {attempt + 1}/{max_retries})")
+                    time.sleep(delay)
+                    continue
+                else:
+                    logging.error("Max retries reached for rate limit")
+                    return {
+                        "narrative_fields": {
+                            "summary": "Error: Rate limit exceeded",
+                            "details": "Too many requests to Groq API. Please wait a moment and try again."
+                        },
+                        "chart_data": {
+                            "sample_array": [],
+                            "sample_labels": []
+                        }
+                    }
+
+            response.raise_for_status()  # Raise an exception for bad status codes
 
         result = response.json()
 
@@ -462,22 +570,6 @@ MP: {mp.get('name', 'Unknown') if mp else 'Unknown'}
 def mp_risk_score(constituency_slug):
     """AI Risk Scorer Module for MP/Constituency"""
     try:
-        # Check cache first
-        cache_parameters = {"constituency_slug": constituency_slug, "module": "risk_score"}
-        cached_response = get_cached_ai_response(
-            prompt=f"v2: Analyze risk for constituency {constituency_slug}",
-            model="claude",
-            parameters=cache_parameters
-        )
-
-        if cached_response:
-            return jsonify({
-                "success": True,
-                "module": "risk_score",
-                "cached": True,
-                "data": cached_response
-            })
-
         # Extract data (for validation)
         data = validate_and_extract_data(constituency_slug)
         if "error" in data:
@@ -512,21 +604,18 @@ def mp_risk_score(constituency_slug):
         }}
         """
 
-        # Call Claude API (mock for now)
-        ai_response = call_claude_api(prompt)
-
-        # Cache the response
-        cache_ai_response(
-            prompt=f"Analyze risk for constituency {constituency_slug}",
+        # Use get_or_compute_ai_response for stampede protection
+        cache_parameters = {"constituency_slug": constituency_slug, "module": "risk_score"}
+        ai_response = get_or_compute_ai_response(
+            prompt=prompt,
             model="claude",
             parameters=cache_parameters,
-            response=ai_response
+            compute_fn=lambda p, m: call_claude_api(p, m)
         )
 
         return jsonify({
             "success": True,
             "module": "risk_score",
-            "cached": False,
             "data": ai_response
         })
 
@@ -538,22 +627,6 @@ def mp_risk_score(constituency_slug):
 def mp_risk_level(constituency_slug):
     """AI Risk Level Analyzer Module for MP/Constituency"""
     try:
-        # Check cache first
-        cache_parameters = {"constituency_slug": constituency_slug, "module": "risk_level"}
-        cached_response = get_cached_ai_response(
-            prompt=f"v2: Analyze risk level for constituency {constituency_slug}",
-            model="claude",
-            parameters=cache_parameters
-        )
-
-        if cached_response:
-            return jsonify({
-                "success": True,
-                "module": "risk_level",
-                "cached": True,
-                "data": cached_response
-            })
-
         # Extract data (for validation)
         data = validate_and_extract_data(constituency_slug)
         if "error" in data:
@@ -587,21 +660,18 @@ def mp_risk_level(constituency_slug):
         }}
         """
 
-        # Call Claude API (mock for now)
-        ai_response = call_claude_api(prompt)
-
-        # Cache the response
-        cache_ai_response(
-            prompt=f"Analyze risk level for constituency {constituency_slug}",
+        # Use get_or_compute_ai_response for stampede protection
+        cache_parameters = {"constituency_slug": constituency_slug, "module": "risk_level"}
+        ai_response = get_or_compute_ai_response(
+            prompt=prompt,
             model="claude",
             parameters=cache_parameters,
-            response=ai_response
+            compute_fn=lambda p, m: call_claude_api(p, m)
         )
 
         return jsonify({
             "success": True,
             "module": "risk_level",
-            "cached": False,
             "data": ai_response
         })
 
@@ -613,22 +683,6 @@ def mp_risk_level(constituency_slug):
 def mp_summary(constituency_slug):
     """AI Summary Generator Module for MP/Constituency"""
     try:
-        # Check cache first
-        cache_parameters = {"constituency_slug": constituency_slug, "module": "summary"}
-        cached_response = get_cached_ai_response(
-            prompt=f"v2: Generate summary for constituency {constituency_slug}",
-            model="claude",
-            parameters=cache_parameters
-        )
-
-        if cached_response:
-            return jsonify({
-                "success": True,
-                "module": "summary",
-                "cached": True,
-                "data": cached_response
-            })
-
         # Extract data (for validation)
         data = validate_and_extract_data(constituency_slug)
         if "error" in data:
@@ -660,21 +714,18 @@ def mp_summary(constituency_slug):
         }}
         """
 
-        # Call Claude API (mock for now)
-        ai_response = call_claude_api(prompt)
-
-        # Cache the response
-        cache_ai_response(
-            prompt=f"Generate summary for constituency {constituency_slug}",
+        # Use get_or_compute_ai_response for stampede protection
+        cache_parameters = {"constituency_slug": constituency_slug, "module": "summary"}
+        ai_response = get_or_compute_ai_response(
+            prompt=prompt,
             model="claude",
             parameters=cache_parameters,
-            response=ai_response
+            compute_fn=lambda p, m: call_claude_api(p, m)
         )
 
         return jsonify({
             "success": True,
             "module": "summary",
-            "cached": False,
             "data": ai_response
         })
 
@@ -687,22 +738,6 @@ def mp_anomalies(constituency_slug):
     """AI Anomalies Detector Module for MP/Constituency.
     Uses GNN-detected anomalies as context for LLM explanations."""
     try:
-        # Check cache first
-        cache_parameters = {"constituency_slug": constituency_slug, "module": "anomalies"}
-        cached_response = get_cached_ai_response(
-            prompt=f"v2: Detect anomalies for constituency {constituency_slug}",
-            model="claude",
-            parameters=cache_parameters
-        )
-
-        if cached_response:
-            return jsonify({
-                "success": True,
-                "module": "anomalies",
-                "cached": True,
-                "data": cached_response
-            })
-
         # Extract data (for validation)
         data = validate_and_extract_data(constituency_slug)
         if "error" in data:
@@ -795,21 +830,18 @@ def mp_anomalies(constituency_slug):
         For normal_range, provide typical ranges for the metrics based on the constituency's historical data.
         """
 
-        # Call Claude API
-        ai_response = call_claude_api(prompt)
-
-        # Cache the response
-        cache_ai_response(
-            prompt=f"Detect anomalies for constituency {constituency_slug}",
+        # Use get_or_compute_ai_response for stampede protection
+        cache_parameters = {"constituency_slug": constituency_slug, "module": "anomalies"}
+        ai_response = get_or_compute_ai_response(
+            prompt=prompt,
             model="claude",
             parameters=cache_parameters,
-            response=ai_response
+            compute_fn=lambda p, m: call_claude_api(p, m)
         )
 
         return jsonify({
             "success": True,
             "module": "anomalies",
-            "cached": False,
             "data": ai_response
         })
 
@@ -821,22 +853,6 @@ def mp_anomalies(constituency_slug):
 def mp_peer_rank(constituency_slug):
     """AI Peer Rank Analyzer Module for MP/Constituency"""
     try:
-        # Check cache first
-        cache_parameters = {"constituency_slug": constituency_slug, "module": "peer_rank"}
-        cached_response = get_cached_ai_response(
-            prompt=f"v2: Analyze peer ranking for constituency {constituency_slug}",
-            model="claude",
-            parameters=cache_parameters
-        )
-
-        if cached_response:
-            return jsonify({
-                "success": True,
-                "module": "peer_rank",
-                "cached": True,
-                "data": cached_response
-            })
-
         # Extract data (for validation)
         data = validate_and_extract_data(constituency_slug)
         if "error" in data:
@@ -870,21 +886,18 @@ def mp_peer_rank(constituency_slug):
         }}
         """
 
-        # Call Claude API (mock for now)
-        ai_response = call_claude_api(prompt)
-
-        # Cache the response
-        cache_ai_response(
-            prompt=f"Analyze peer ranking for constituency {constituency_slug}",
+        # Use get_or_compute_ai_response for stampede protection
+        cache_parameters = {"constituency_slug": constituency_slug, "module": "peer_rank"}
+        ai_response = get_or_compute_ai_response(
+            prompt=prompt,
             model="claude",
             parameters=cache_parameters,
-            response=ai_response
+            compute_fn=lambda p, m: call_claude_api(p, m)
         )
 
         return jsonify({
             "success": True,
             "module": "peer_rank",
-            "cached": False,
             "data": ai_response
         })
 
@@ -896,22 +909,6 @@ def mp_peer_rank(constituency_slug):
 def mp_citizen_actions(constituency_slug):
     """AI Citizen Actions Recommender Module for MP/Constituency"""
     try:
-        # Check cache first
-        cache_parameters = {"constituency_slug": constituency_slug, "module": "citizen_actions"}
-        cached_response = get_cached_ai_response(
-            prompt=f"v2: Generate citizen action recommendations for constituency {constituency_slug}",
-            model="claude",
-            parameters=cache_parameters
-        )
-
-        if cached_response:
-            return jsonify({
-                "success": True,
-                "module": "citizen_actions",
-                "cached": True,
-                "data": cached_response
-            })
-
         # Extract data (for validation)
         data = validate_and_extract_data(constituency_slug)
         if "error" in data:
@@ -945,21 +942,18 @@ def mp_citizen_actions(constituency_slug):
         }}
         """
 
-        # Call Claude API (mock for now)
-        ai_response = call_claude_api(prompt)
-
-        # Cache the response
-        cache_ai_response(
-            prompt=f"Generate citizen action recommendations for constituency {constituency_slug}",
+        # Use get_or_compute_ai_response for stampede protection
+        cache_parameters = {"constituency_slug": constituency_slug, "module": "citizen_actions"}
+        ai_response = get_or_compute_ai_response(
+            prompt=prompt,
             model="claude",
             parameters=cache_parameters,
-            response=ai_response
+            compute_fn=lambda p, m: call_claude_api(p, m)
         )
 
         return jsonify({
             "success": True,
             "module": "citizen_actions",
-            "cached": False,
             "data": ai_response
         })
 
@@ -971,22 +965,6 @@ def mp_citizen_actions(constituency_slug):
 def mp_data_sources(constituency_slug):
     """AI Data Sources Analyzer Module for MP/Constituency"""
     try:
-        # Check cache first
-        cache_parameters = {"constituency_slug": constituency_slug, "module": "data_sources"}
-        cached_response = get_cached_ai_response(
-            prompt=f"v2: Analyze data sources for constituency {constituency_slug}",
-            model="claude",
-            parameters=cache_parameters
-        )
-
-        if cached_response:
-            return jsonify({
-                "success": True,
-                "module": "data_sources",
-                "cached": True,
-                "data": cached_response
-            })
-
         # Extract data (for validation)
         data = validate_and_extract_data(constituency_slug)
         if "error" in data:
@@ -1020,21 +998,18 @@ def mp_data_sources(constituency_slug):
         }}
         """
 
-        # Call Claude API (mock for now)
-        ai_response = call_claude_api(prompt)
-
-        # Cache the response
-        cache_ai_response(
-            prompt=f"Analyze data sources for constituency {constituency_slug}",
+        # Use get_or_compute_ai_response for stampede protection
+        cache_parameters = {"constituency_slug": constituency_slug, "module": "data_sources"}
+        ai_response = get_or_compute_ai_response(
+            prompt=prompt,
             model="claude",
             parameters=cache_parameters,
-            response=ai_response
+            compute_fn=lambda p, m: call_claude_api(p, m)
         )
 
         return jsonify({
             "success": True,
             "module": "data_sources",
-            "cached": False,
             "data": ai_response
         })
 
@@ -1090,22 +1065,6 @@ def mp_cached_at(constituency_slug):
 def governor_fiscal_health():
     """AI Fiscal Health Scorer Module for Governor"""
     try:
-        # Check cache first
-        cache_parameters = {"module": "fiscal_health"}
-        cached_response = get_cached_ai_response(
-            prompt="v2: Analyze fiscal health of county government",
-            model="claude",
-            parameters=cache_parameters
-        )
-
-        if cached_response:
-            return jsonify({
-                "success": True,
-                "module": "fiscal_health",
-                "cached": True,
-                "data": cached_response
-            })
-
         # Generate concise summary for fiscal health analysis
         governor_summary = generate_governor_summary("fiscal_health")
 
@@ -1131,21 +1090,18 @@ def governor_fiscal_health():
         }}
         """
 
-        # Call Claude API (mock for now)
-        ai_response = call_claude_api(prompt)
-
-        # Cache the response
-        cache_ai_response(
-            prompt="Analyze fiscal health of county government",
+        # Use get_or_compute_ai_response for stampede protection
+        cache_parameters = {"module": "fiscal_health"}
+        ai_response = get_or_compute_ai_response(
+            prompt=prompt,
             model="claude",
             parameters=cache_parameters,
-            response=ai_response
+            compute_fn=lambda p, m: call_claude_api(p, m)
         )
 
         return jsonify({
             "success": True,
             "module": "fiscal_health",
-            "cached": False,
             "data": ai_response
         })
 
@@ -1157,22 +1113,6 @@ def governor_fiscal_health():
 def governor_dept_absorption():
     """AI Dept Absorption Analyst Module for Governor"""
     try:
-        # Check cache first
-        cache_parameters = {"module": "dept_absorption"}
-        cached_response = get_cached_ai_response(
-            prompt="v2: Analyze department budget absorption rates",
-            model="claude",
-            parameters=cache_parameters
-        )
-
-        if cached_response:
-            return jsonify({
-                "success": True,
-                "module": "dept_absorption",
-                "cached": True,
-                "data": cached_response
-            })
-
         # Generate concise summary for department absorption analysis
         governor_summary = generate_governor_summary("dept_absorption")
 
@@ -1196,21 +1136,18 @@ def governor_dept_absorption():
         }}
         """
 
-        # Call Claude API (mock for now)
-        ai_response = call_claude_api(prompt)
-
-        # Cache the response
-        cache_ai_response(
-            prompt="Analyze department budget absorption rates",
+        # Use get_or_compute_ai_response for stampede protection
+        cache_parameters = {"module": "dept_absorption"}
+        ai_response = get_or_compute_ai_response(
+            prompt=prompt,
             model="claude",
             parameters=cache_parameters,
-            response=ai_response
+            compute_fn=lambda p, m: call_claude_api(p, m)
         )
 
         return jsonify({
             "success": True,
             "module": "dept_absorption",
-            "cached": False,
             "data": ai_response
         })
 
@@ -1222,22 +1159,6 @@ def governor_dept_absorption():
 def governor_osr_analysis():
     """AI OSR Analyser Module for Governor"""
     try:
-        # Check cache first
-        cache_parameters = {"module": "osr_analysis"}
-        cached_response = get_cached_ai_response(
-            prompt="v2: Analyze Own Source Revenue (OSR) performance",
-            model="claude",
-            parameters=cache_parameters
-        )
-
-        if cached_response:
-            return jsonify({
-                "success": True,
-                "module": "osr_analysis",
-                "cached": True,
-                "data": cached_response
-            })
-
         # Generate concise summary for OSR analysis
         governor_summary = generate_governor_summary("osr_analysis")
 
@@ -1262,21 +1183,18 @@ def governor_osr_analysis():
         }}
         """
 
-        # Call Claude API (mock for now)
-        ai_response = call_claude_api(prompt)
-
-        # Cache the response
-        cache_ai_response(
-            prompt="Analyze Own Source Revenue (OSR) performance",
+        # Use get_or_compute_ai_response for stampede protection
+        cache_parameters = {"module": "osr_analysis"}
+        ai_response = get_or_compute_ai_response(
+            prompt=prompt,
             model="claude",
             parameters=cache_parameters,
-            response=ai_response
+            compute_fn=lambda p, m: call_claude_api(p, m)
         )
 
         return jsonify({
             "success": True,
             "module": "osr_analysis",
-            "cached": False,
             "data": ai_response
         })
 
@@ -1288,22 +1206,6 @@ def governor_osr_analysis():
 def governor_department_flags():
     """AI Department Flags Module for Governor"""
     try:
-        # Check cache first
-        cache_parameters = {"module": "department_flags"}
-        cached_response = get_cached_ai_response(
-            prompt="v2: Identify department-specific risk flags",
-            model="claude",
-            parameters=cache_parameters
-        )
-
-        if cached_response:
-            return jsonify({
-                "success": True,
-                "module": "department_flags",
-                "cached": True,
-                "data": cached_response
-            })
-
         # Generate concise summary for department flags analysis
         governor_summary = generate_governor_summary("department_flags")
 
@@ -1328,21 +1230,18 @@ def governor_department_flags():
         }}
         """
 
-        # Call Claude API (mock for now)
-        ai_response = call_claude_api(prompt)
-
-        # Cache the response
-        cache_ai_response(
-            prompt="Identify department-specific risk flags",
+        # Use get_or_compute_ai_response for stampede protection
+        cache_parameters = {"module": "department_flags"}
+        ai_response = get_or_compute_ai_response(
+            prompt=prompt,
             model="claude",
             parameters=cache_parameters,
-            response=ai_response
+            compute_fn=lambda p, m: call_claude_api(p, m)
         )
 
         return jsonify({
             "success": True,
             "module": "department_flags",
-            "cached": False,
             "data": ai_response
         })
 
@@ -1354,22 +1253,6 @@ def governor_department_flags():
 def governor_top_risks():
     """AI Top Risks & Citizen Actions Module for Governor"""
     try:
-        # Check cache first
-        cache_parameters = {"module": "top_risks"}
-        cached_response = get_cached_ai_response(
-            prompt="v2: Identify top risks and recommend citizen actions for county government",
-            model="claude",
-            parameters=cache_parameters
-        )
-
-        if cached_response:
-            return jsonify({
-                "success": True,
-                "module": "top_risks",
-                "cached": True,
-                "data": cached_response
-            })
-
         # Generate concise summary for top risks analysis
         governor_summary = generate_governor_summary("top_risks")
 
@@ -1394,21 +1277,18 @@ def governor_top_risks():
         }}
         """
 
-        # Call Claude API (mock for now)
-        ai_response = call_claude_api(prompt)
-
-        # Cache the response
-        cache_ai_response(
-            prompt="Identify top risks and recommend citizen actions for county government",
+        # Use get_or_compute_ai_response for stampede protection
+        cache_parameters = {"module": "top_risks"}
+        ai_response = get_or_compute_ai_response(
+            prompt=prompt,
             model="claude",
             parameters=cache_parameters,
-            response=ai_response
+            compute_fn=lambda p, m: call_claude_api(p, m)
         )
 
         return jsonify({
             "success": True,
             "module": "top_risks",
-            "cached": False,
             "data": ai_response
         })
 
@@ -1421,22 +1301,6 @@ def governor_top_risks():
 def county_narrative():
     """AI County Narrative Generator Module"""
     try:
-        # Check cache first
-        cache_parameters = {"module": "county_narrative"}
-        cached_response = get_cached_ai_response(
-            prompt="v2: Generate county narrative covering both MP and Governor perspectives",
-            model="claude",
-            parameters=cache_parameters
-        )
-
-        if cached_response:
-            return jsonify({
-                "success": True,
-                "module": "county_narrative",
-                "cached": True,
-                "data": cached_response
-            })
-
         # Generate concise summaries
         governor_summary = generate_governor_summary("county_narrative")
 
@@ -1478,21 +1342,18 @@ def county_narrative():
         }}
         """
 
-        # Call Claude API (mock for now)
-        ai_response = call_claude_api(prompt)
-
-        # Cache the response
-        cache_ai_response(
-            prompt="Generate county narrative covering both MP and Governor perspectives",
+        # Use get_or_compute_ai_response for stampede protection
+        cache_parameters = {"module": "county_narrative"}
+        ai_response = get_or_compute_ai_response(
+            prompt=prompt,
             model="claude",
             parameters=cache_parameters,
-            response=ai_response
+            compute_fn=lambda p, m: call_claude_api(p, m)
         )
 
         return jsonify({
             "success": True,
             "module": "county_narrative",
-            "cached": False,
             "data": ai_response
         })
 
@@ -1509,29 +1370,6 @@ def findings_classifier():
         request_data = request.get_json(silent=True) or {}
         finding_id = request_data.get("finding_id")
         finding_text = request_data.get("finding_text")
-
-        # Check cache first (if we have specific finding data)
-        cache_parameters = {
-            "module": "finding_classifier",
-            "finding_id": finding_id,
-            "finding_text": finding_text
-        }
-
-        # Only check cache if we have specific finding identifiers
-        if finding_id or finding_text:
-            cached_response = get_cached_ai_response(
-                prompt=f"v2: Classify and analyze audit finding: {finding_text or finding_id}",
-                model="claude",
-                parameters=cache_parameters
-            )
-
-            if cached_response:
-                return jsonify({
-                    "success": True,
-                    "module": "finding_classifier",
-                    "cached": True,
-                    "data": cached_response
-                })
 
         # Extract data (governor-wide findings analysis)
         data = validate_and_extract_data()  # No constituency slug for analysis of all findings
@@ -1564,22 +1402,30 @@ def findings_classifier():
             governor_data=json.dumps(data.get('governor', {}), default=str)
         )
 
-        # Call Claude API (mock for now)
-        ai_response = call_claude_api(prompt)
+        # Use get_or_compute_ai_response for stampede protection (only if we have specific identifiers for caching)
+        cache_parameters = {
+            "module": "finding_classifier",
+            "finding_id": finding_id,
+            "finding_text": finding_text
+        }
 
-        # Cache the response (if we have specific identifiers)
         if finding_id or finding_text:
-            cache_ai_response(
-                prompt=f"Classify and analyze audit finding: {finding_text or finding_id}",
+            ai_response = get_or_compute_ai_response(
+                prompt=prompt,
                 model="claude",
                 parameters=cache_parameters,
-                response=ai_response
+                compute_fn=lambda p, m: call_claude_api(p, m)
             )
+            cached = True
+        else:
+            # No caching for generic "all findings" request
+            ai_response = call_claude_api(prompt)
+            cached = False
 
         return jsonify({
             "success": True,
             "module": "finding_classifier",
-            "cached": bool(finding_id or finding_text),
+            "cached": cached,
             "data": ai_response
         })
 
@@ -1598,29 +1444,6 @@ def compare_leaders():
         leader1_id = request_data.get("leader1_id")  # governor name or constituency slug
         leader2_type = request_data.get("leader2_type", "constituency")  # governor or constituency
         leader2_id = request_data.get("leader2_id")  # governor name or constituency slug
-
-        # Check cache first
-        cache_parameters = {
-            "module": "compare",
-            "leader1_type": leader1_type,
-            "leader1_id": leader1_id,
-            "leader2_type": leader2_type,
-            "leader2_id": leader2_id
-        }
-
-        cached_response = get_cached_ai_response(
-            prompt=f"v2: Compare {leader1_type} {leader1_id} with {leader2_type} {leader2_id}",
-            model="claude",
-            parameters=cache_parameters
-        )
-
-        if cached_response:
-            return jsonify({
-                "success": True,
-                "module": "compare",
-                "cached": True,
-                "data": cached_response
-            })
 
         # Extract data
         data = validate_and_extract_data(leader1_id if leader1_type == "constituency" else None)
@@ -1663,21 +1486,25 @@ def compare_leaders():
             leader2_data=json.dumps(data2.get('constituency' if leader2_type == 'constituency' else 'governor', {}), default=str) if (leader2_type == 'constituency' and data2.get('constituency')) or (leader2_type == 'governor' and data2.get('governor')) else "{}"
         )
 
-        # Call Claude API (mock for now)
-        ai_response = call_claude_api(prompt)
+        # Use get_or_compute_ai_response for stampede protection
+        cache_parameters = {
+            "module": "compare",
+            "leader1_type": leader1_type,
+            "leader1_id": leader1_id,
+            "leader2_type": leader2_type,
+            "leader2_id": leader2_id
+        }
 
-        # Cache the response
-        cache_ai_response(
-            prompt=f"Compare {leader1_type} {leader1_id} with {leader2_type} {leader2_id}",
+        ai_response = get_or_compute_ai_response(
+            prompt=prompt,
             model="claude",
             parameters=cache_parameters,
-            response=ai_response
+            compute_fn=lambda p, m: call_claude_api(p, m)
         )
 
         return jsonify({
             "success": True,
             "module": "compare",
-            "cached": False,
             "data": ai_response
         })
 
