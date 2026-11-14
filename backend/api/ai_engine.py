@@ -600,15 +600,13 @@ Return ONLY a JSON object with exactly this structure (all keys required):
 {{
   "narrative_fields": {{
     "risk_level": "Medium",
-    "summary": "Brief summary of risk factors"
-  }},
-  "chart_data": {{
-    "risk_score": 75,
-    "peer_scores": [{{"constituent": "Constituency Name", "score": 65}}],
-    "allocation_trend": [{{"fy": "2023/24", "amount": 120, "anomaly_flag": false}}]
+    "summary": "Plain-language explanation of the constituency's financial risk level for citizens",
+    "key_findings": "Top 3 most important findings explained simply",
+    "what_this_means": "What this risk level means for everyday citizens",
+    "recommended_actions": "Specific actions citizens can take based on this analysis"
   }}
 }}
-NOTE: risk_score must be 0-100. peer_scores is an array of objects. allocation_trend anomaly_flag is boolean.
+NOTE: Provide comprehensive, accessible narratives. Charts/tables are rendered separately by the frontend.
 """
 
         cache_parameters = {"constituency_slug": constituency_slug, "module": "risk_score"}
@@ -656,15 +654,13 @@ Governor Summary:
 Return ONLY a JSON object with exactly this structure (all keys required):
 {{
   "narrative_fields": {{
-    "summary": "Explanation of risk level",
-    "anomalies": "Description of any anomalies found",
-    "citizen_actions": "Recommended actions for citizens"
-  }},
-  "chart_data": {{
-    "peer_scores": [{{"constituent": "Constituency Name", "score": 65}}]
+    "risk_level_explanation": "Plain-language explanation of the risk level and what drove it",
+    "anomalies_found": "Description of any anomalies in simple terms",
+    "what_citizens_should_know": "Key takeaways for everyday citizens",
+    "recommended_actions": "Specific, actionable steps citizens can take"
   }}
 }}
-NOTE: peer_scores is an array of objects with constituent (string) and score (number).
+NOTE: Provide comprehensive, accessible narratives. Charts/tables are rendered separately by the frontend.
 """
 
         cache_parameters = {"constituency_slug": constituency_slug, "module": "risk_level"}
@@ -712,13 +708,14 @@ Governor Summary:
 Return ONLY a JSON object with exactly this structure (all keys required):
 {{
   "narrative_fields": {{
-    "summary": "Comprehensive summary of constituency performance"
-  }},
-  "chart_data": {{
-    "key_metrics": [{{"label": "Total Allocations", "value": 500}}]
+    "executive_summary": "One-paragraph overview for busy citizens",
+    "financial_performance": "How the constituency's finances are doing, explained simply",
+    "audit_findings_explained": "What the audit findings mean in plain language",
+    "strengths_and_concerns": "What's working well and what needs attention",
+    "what_this_means_for_you": "Direct impact on citizens and services"
   }}
 }}
-NOTE: key_metrics is an array of objects with label (string) and value (number).
+NOTE: Provide comprehensive, accessible narratives. Charts/tables are rendered separately by the frontend.
 """
 
         cache_parameters = {"constituency_slug": constituency_slug, "module": "summary"}
@@ -823,15 +820,14 @@ Governor Summary:
 Return ONLY a JSON object with exactly this structure (all keys required):
 {{
   "narrative_fields": {{
-    "summary": "Plain-language summary of GNN anomalies and high-severity audit findings for citizens",
-    "details": "Detailed explanation combining GNN findings and audit misappropriations, why they matter, and recommended actions"
-  }},
-  "chart_data": {{
-    "anomaly_points": [{{"fy": "2023/24", "metric": "Audit Misappropriation", "value": 50, "expected": 0}}],
-    "normal_range": [{{"fy": "2023/24", "min": 0, "max": 10}}]
+    "summary": "Plain-language summary of anomalies and audit findings for citizens",
+    "what_was_found": "What the GNN model and audits detected, explained simply",
+    "why_it_matters": "Why these anomalies matter for public funds and services",
+    "recommended_actions": "Specific steps citizens and officials should take",
+    "confidence_level": "How confident the analysis is and any limitations"
   }}
 }}
-NOTE: anomaly_points is an array of objects with fy (string), metric (string), value (number), expected (number). normal_range is an array of objects with fy (string), min (number), max (number).
+NOTE: Provide comprehensive, accessible narratives. Charts/tables are rendered separately by the frontend.
 """
 
         cache_parameters = {"constituency_slug": constituency_slug, "module": "anomalies"}
@@ -879,15 +875,14 @@ Governor Summary:
 Return ONLY a JSON object with exactly this structure (all keys required):
 {{
   "narrative_fields": {{
-    "ranking_explanation": "Explanation of ranking methodology",
-    "insights": "Key insights from peer comparison"
-  }},
-  "chart_data": {{
-    "peer_scores": [{{"constituent": "Constituency Name", "score": 65}}],
-    "ranking_distribution": {{"excellent": 2, "good": 5, "average": 10, "poor": 3, "very_poor": 1}}
+    "how_ranking_works": "Plain-language explanation of how the peer ranking is calculated",
+    "where_constituency_stands": "Where this constituency ranks and what that means",
+    "key_comparisons": "How it compares to similar constituencies",
+    "what_drives_the_ranking": "The main factors pushing the ranking up or down",
+    "actionable_insights": "What citizens and officials should focus on to improve"
   }}
 }}
-NOTE: peer_scores is an array of objects. ranking_distribution is an object with counts for each category.
+NOTE: Provide comprehensive, accessible narratives. Charts/tables are rendered separately by the frontend.
 """
 
         cache_parameters = {"constituency_slug": constituency_slug, "module": "peer_rank"}
@@ -935,15 +930,16 @@ Governor Summary:
 Return ONLY a JSON object with exactly this structure (all keys required):
 {{
   "narrative_fields": {{
-    "recommended_actions": "Detailed recommended actions for citizens",
-    "priority_level": "High"
-  }},
-  "chart_data": {{
-    "action_effectiveness": [{{"action": "Attend public hearings", "effectiveness": 80, "cost": 10}}],
-    "implementation_timeline": [{{"phase": "Immediate", "duration": 1}}]
+    "priority_level": "High",
+    "immediate_actions": "What citizens can do right now",
+    "short_term_actions": "Actions to take in the next 3 months",
+    "long_term_actions": "Ongoing engagement strategies",
+    "why_these_actions_matter": "How these actions can create real change",
+    "barriers_and_how_to_overcome": "Common obstacles and practical solutions",
+    "success_examples": "Where similar actions have worked before"
   }}
 }}
-NOTE: action_effectiveness is an array of objects with action (string), effectiveness (0-100), cost (0-100). implementation_timeline is an array of objects with phase (string), duration (number of months). priority_level must be High, Medium, or Low.
+NOTE: Provide comprehensive, accessible narratives. Charts/tables are rendered separately by the frontend.
 """
 
         cache_parameters = {"constituency_slug": constituency_slug, "module": "citizen_actions"}
@@ -991,15 +987,14 @@ Governor Summary:
 Return ONLY a JSON object with exactly this structure (all keys required):
 {{
   "narrative_fields": {{
-    "data_quality_assessment": "Good",
-    "source_reliability": "Official government sources are reliable"
-  }},
-  "chart_data": {{
-    "source_scores": [{{"source": "Auditor-General Reports", "reliability": 90, "completeness": 85}}],
-    "data_gaps": [{{"gap_type": "Missing quarterly updates", "severity": 30}}]
+    "data_quality_overview": "Overall assessment of data quality in plain language",
+    "strongest_sources": "Which data sources are most reliable and why",
+    "key_gaps_and_impact": "What data is missing and how it affects the analysis",
+    "what_this_means_for_findings": "How data quality affects confidence in the results",
+    "recommendations_for_better_data": "What would improve the analysis for next time"
   }}
 }}
-NOTE: source_scores is an array of objects with source (string), reliability (0-100), completeness (0-100). data_gaps is an array of objects with gap_type (string), severity (0-100).
+NOTE: Provide comprehensive, accessible narratives. Charts/tables are rendered separately by the frontend.
 """
 
         cache_parameters = {"constituency_slug": constituency_slug, "module": "data_sources"}
@@ -1083,17 +1078,15 @@ Governor Data Summary:
 Return ONLY a JSON object with exactly this structure (all keys required):
 {{
   "narrative_fields": {{
-    "health_level": "Moderate",
-    "budget_summary": "Summary of budget performance",
-    "osr_analysis": "Own Source Revenue analysis"
-  }},
-  "chart_data": {{
-    "health_score": 65,
-    "revenue_trend": [{{"fy": "2023/24", "equitable": 5.2, "conditional": 1.1, "osr": 0.8, "health": 65}}],
-    "osr_trend": [{{"fy": "2023/24", "target": 1.0, "actual": 0.8}}]
+    "overall_assessment": "Plain-language assessment of the county's fiscal health",
+    "revenue_story": "Where money comes from and whether it's sustainable",
+    "spending_story": "Where money goes and whether it's effective",
+    "key_risks": "Top financial risks that could impact services",
+    "what_citizens_should_know": "Direct implications for public services and taxes",
+    "recommendations": "What should be done to improve fiscal health"
   }}
 }}
-NOTE: health_score must be 0-100. health_level must be Strong, Moderate, or Weak. revenue_trend is an array of objects. osr_trend is an array of objects with target and actual (numbers).
+NOTE: Provide comprehensive, accessible narratives. Charts/tables are rendered separately by the frontend.
 """
 
         cache_parameters = {"module": "fiscal_health"}
@@ -1134,14 +1127,14 @@ Governor Data Summary:
 Return ONLY a JSON object with exactly this structure (all keys required):
 {{
   "narrative_fields": {{
-    "risk_flag": "Medium",
-    "projections": "Year-end projection explanations"
-  }},
-  "chart_data": {{
-    "dept_absorption": [{{"name": "Health", "pct": 75, "risk_level": "Low"}}]
+    "overall_assessment": "Plain-language assessment of department budget performance",
+    "departments_of_concern": "Which departments are under/over-spending and why it matters",
+    "what_absorption_means": "What budget absorption rates tell us about service delivery",
+    "year_end_outlook": "Projected spending patterns and potential issues",
+    "recommendations": "Actions to improve budget execution and service delivery"
   }}
 }}
-NOTE: risk_flag must be Low, Medium, or High. dept_absorption is an array of objects with name (string), pct (0-100), risk_level (Low/Medium/High).
+NOTE: Provide comprehensive, accessible narratives. Charts/tables are rendered separately by the frontend.
 """
 
         cache_parameters = {"module": "dept_absorption"}
@@ -1182,15 +1175,15 @@ Governor Data Summary:
 Return ONLY a JSON object with exactly this structure (all keys required):
 {{
   "narrative_fields": {{
-    "osr_performance": "Assessment of OSR performance",
-    "trend_analysis": "Analysis of OSR trends over time"
-  }},
-  "chart_data": {{
-    "osr_breakdown": [{{"source": "Property Tax", "amount": 500, "percentage": 60}}],
-    "osr_growth": [{{"fy": "2023/24", "growth_rate": 5.2}}]
+    "osr_story": "Plain-language story of how the county generates its own revenue",
+    "performance_assessment": "How well the county is doing at collecting local revenue",
+    "key_sources_explained": "Main revenue sources and their reliability",
+    "trends_and_drivers": "What's driving revenue up or down",
+    "gaps_and_opportunities": "Where revenue collection could improve",
+    "recommendations": "Actions to strengthen local revenue generation"
   }}
 }}
-NOTE: osr_breakdown is an array of objects with source (string), amount (number), percentage (0-100). osr_growth is an array of objects with fy (string), growth_rate (number).
+NOTE: Provide comprehensive, accessible narratives. Charts/tables are rendered separately by the frontend.
 """
 
         cache_parameters = {"module": "osr_analysis"}
@@ -1231,15 +1224,15 @@ Governor Data Summary:
 Return ONLY a JSON object with exactly this structure (all keys required):
 {{
   "narrative_fields": {{
-    "flags_summary": "Summary of identified flags",
-    "recommendations": "Recommended actions for flagged departments"
-  }},
-  "chart_data": {{
-    "dept_risk_scores": [{{"name": "Health", "risk_score": 30, "risk_level": "Low"}}],
-    "trend_indicators": [{{"name": "Education", "trend": "improving", "significance": 75}}]
+    "flags_overview": "Plain-language summary of which departments have issues and why",
+    "highest_priority_departments": "Which departments need immediate attention and why",
+    "what_the_flags_mean": "What each type of flag indicates for service delivery",
+    "root_causes": "Underlying reasons behind the flagged issues",
+    "recommended_interventions": "Specific actions for each flagged department",
+    "monitoring_plan": "How to track improvement over time"
   }}
 }}
-NOTE: dept_risk_scores is an array of objects with name (string), risk_score (0-100), risk_level (Low/Medium/High). trend_indicators is an array of objects with name (string), trend (string), significance (0-100).
+NOTE: Provide comprehensive, accessible narratives. Charts/tables are rendered separately by the frontend.
 """
 
         cache_parameters = {"module": "department_flags"}
@@ -1280,15 +1273,15 @@ Governor Data Summary:
 Return ONLY a JSON object with exactly this structure (all keys required):
 {{
   "narrative_fields": {{
-    "top_risks": "Description of top risks",
-    "citizen_guidance": "Guidance for citizen engagement"
-  }},
-  "chart_data": {{
-    "risk_matrix": [{{"risk": "Budget shortfall", "impact": 80, "likelihood": 60}}],
-    "action_impact": [{{"action": "Public hearings", "impact": 70, "feasibility": 85}}]
+    "top_risks_explained": "Plain-language explanation of the biggest risks facing the county",
+    "why_these_risks_matter": "How each risk could affect public services and citizens",
+    "early_warning_signs": "What to watch for that signals a risk is materializing",
+    "citizen_action_plan": "Specific steps citizens can take to address each risk",
+    "accountability_questions": "Questions citizens should ask their elected officials",
+    "success_indicators": "How to know if risk mitigation is working"
   }}
 }}
-NOTE: risk_matrix is an array of objects with risk (string), impact (0-100), likelihood (0-100). action_impact is an array of objects with action (string), impact (0-100), feasibility (0-100).
+NOTE: Provide comprehensive, accessible narratives. Charts/tables are rendered separately by the frontend.
 """
 
         cache_parameters = {"module": "top_risks"}
@@ -1345,16 +1338,17 @@ Constituency Data Summary:
 Return ONLY a JSON object with exactly this structure (all keys required):
 {{
   "narrative_fields": {{
-    "mp_paragraph": "NG-CDF/MP perspective narrative",
-    "governor_paragraph": "County executive perspective narrative",
-    "county_health_score": 70
-  }},
-  "chart_data": {{
-    "cross_leader_anomalies": [{{"type": "Budget mismatch", "description": "Description of anomaly", "severity": 60}}],
-    "constituency_risk_scores": [{{"name": "Constituency Name", "score": 45}}]
+    "executive_summary": "One-paragraph overview of the entire county's accountability landscape",
+    "mp_perspective": "How the MP/NG-CDF track is performing, explained for citizens",
+    "governor_perspective": "How the county executive track is performing, explained for citizens",
+    "where_they_align": "Areas where both tracks are doing well or poorly together",
+    "where_they_diverge": "Key differences in performance and accountability",
+    "cross_leader_insights": "How MP and Governor actions affect each other",
+    "citizen_takeaways": "What this means for you and your community",
+    "priority_actions": "Top things citizens should focus on county-wide"
   }}
 }}
-NOTE: county_health_score must be 0-100. cross_leader_anomalies is an array of objects with type (string), description (string), severity (0-100). constituency_risk_scores is an array of objects with name (string), score (0-100).
+NOTE: Provide comprehensive, accessible narratives. Charts/tables are rendered separately by the frontend.
 """
 
         cache_parameters = {"module": "county_narrative"}
@@ -1404,15 +1398,15 @@ Return ONLY a JSON object with exactly this structure (all keys required):
 {{
   "narrative_fields": {{
     "severity": "High",
-    "plain_english_summary": "Accessible summary of findings",
-    "recommended_action": "Recommended course of action"
-  }},
-  "chart_data": {{
-    "severity_counts": {{"high": 5, "medium": 10, "low": 15}},
-    "findings_by_constituency": [{{"name": "Constituency Name", "count": 3}}]
+    "what_was_found": "Plain-language summary of the audit findings",
+    "what_it_means": "Why these findings matter for public funds and services",
+    "who_is_affected": "Which communities and services are impacted",
+    "root_causes": "Underlying reasons behind the findings",
+    "recommended_actions": "Specific steps for accountability and remediation",
+    "follow_up_questions": "Questions citizens should ask for transparency"
   }}
 }}
-NOTE: severity must be High, Medium, or Low. severity_counts is an object with high, medium, low (numbers). findings_by_constituency is an array of objects with name (string), count (number).
+NOTE: severity must be High, Medium, or Low. Provide comprehensive, accessible narratives. Charts/tables are rendered separately by the frontend.
 """
 
         cache_parameters = {
@@ -1536,9 +1530,13 @@ Leader 2 ({leader2_type}): {leader2_summary}
 Return ONLY a JSON object with exactly this structure (all keys required):
 {{
   "narrative_fields": {{
-    "comparative_analysis": "Detailed comparison analysis",
+    "executive_summary": "One-paragraph comparison for busy citizens",
     "stronger_track": "MP",
-    "reasoning": "Explanation of reasoning behind assessment"
+    "key_differences": "Main ways the two leadership tracks differ in performance",
+    "shared_strengths": "Where both tracks are doing well",
+    "shared_weaknesses": "Where both tracks need improvement",
+    "what_this_means_for_citizens": "How the comparison affects services and accountability",
+    "recommendations": "Actions to improve both tracks and their coordination"
   }}
 }}
 NOTE: stronger_track must be MP or Governor. chart_data is computed server-side and will be merged with your response.
