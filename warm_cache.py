@@ -6,9 +6,17 @@ Pre-populates the AI cache with commonly requested analyses to improve performan
 
 import os
 import sys
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
-from backend.api.ai_engine import (
+# Add backend directory to path for imports
+backend_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'backend')
+sys.path.insert(0, backend_dir)
+
+# Create Flask app and push application context for database access
+from app import create_app
+app = create_app()
+app.app_context().push()
+
+from api.ai_engine import (
     get_db,
     generate_cache_key,
     cache_ai_response,

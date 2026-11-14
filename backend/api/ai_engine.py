@@ -47,9 +47,14 @@ def _error(summary: str, details: str) -> dict:
     }
 
 
-# Create TTL index once at startup
+# Create TTL index once at startup (lazy initialization)
+_index_created = False
+
 def _ensure_cache_index():
-    """Ensure the cache TTL index exists. Call once at app startup."""
+    """Ensure the cache TTL index exists. Called lazily on first cache access."""
+    global _index_created
+    if _index_created:
+        return
     try:
         collection = get_db().ai_cache
         collection.create_index(
@@ -57,15 +62,14 @@ def _ensure_cache_index():
             expireAfterSeconds=0,
             background=True
         )
+        _index_created = True
     except Exception:
         pass
 
 
-_ensure_cache_index()
-
-
 def get_ai_cache_collection():
     """Get the AI cache collection."""
+    _ensure_cache_index()
     db = get_db()
     return db.ai_cache
 
