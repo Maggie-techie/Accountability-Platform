@@ -258,46 +258,46 @@ def call_claude_api(prompt: str, model: str = None) -> dict:
 
             response.raise_for_status()  # Raise an exception for bad status codes
 
-        result = response.json()
+            result = response.json()
 
-        # Extract the content from the first choice
-        if "choices" in result and len(result["choices"]) > 0:
-            message = result["choices"][0].get("message", {})
-            content = message.get("content", "")
+            # Extract the content from the first choice
+            if "choices" in result and len(result["choices"]) > 0:
+                message = result["choices"][0].get("message", {})
+                content = message.get("content", "")
 
-            # Try to parse the content as JSON
-            try:
-                # The content might be a JSON string, or it might have extra text.
-                # We assume the prompt instructs the model to return ONLY a JSON object.
-                # We'll try to parse the entire content as JSON.
-                parsed = json.loads(content)
-                return parsed
-            except json.JSONDecodeError as e:
-                logging.error(f"Failed to parse Groq response as JSON: {e}")
-                logging.error(f"Response content: {content}")
-                # Return a fallback structure
+                # Try to parse the content as JSON
+                try:
+                    # The content might be a JSON string, or it might have extra text.
+                    # We assume the prompt instructs the model to return ONLY a JSON object.
+                    # We'll try to parse the entire content as JSON.
+                    parsed = json.loads(content)
+                    return parsed
+                except json.JSONDecodeError as e:
+                    logging.error(f"Failed to parse Groq response as JSON: {e}")
+                    logging.error(f"Response content: {content}")
+                    # Return a fallback structure
+                    return {
+                        "narrative_fields": {
+                            "summary": "Error: Failed to parse Groq response",
+                            "details": f"Groq API returned invalid JSON: {str(e)}"
+                        },
+                        "chart_data": {
+                            "sample_array": [],
+                            "sample_labels": []
+                        }
+                    }
+            else:
+                logging.error("No choices in Groq API response")
                 return {
                     "narrative_fields": {
-                        "summary": "Error: Failed to parse Groq response",
-                        "details": f"Groq API returned invalid JSON: {str(e)}"
+                        "summary": "Error: Empty response from Groq API",
+                        "details": "The Groq API returned no choices"
                     },
                     "chart_data": {
                         "sample_array": [],
                         "sample_labels": []
                     }
                 }
-        else:
-            logging.error("No choices in Groq API response")
-            return {
-                "narrative_fields": {
-                    "summary": "Error: Empty response from Groq API",
-                    "details": "The Groq API returned no choices"
-                },
-                "chart_data": {
-                    "sample_array": [],
-                    "sample_labels": []
-                }
-            }
     except requests.exceptions.RequestException as e:
         logging.error(f"Request to Groq API failed: {e}")
         return {
