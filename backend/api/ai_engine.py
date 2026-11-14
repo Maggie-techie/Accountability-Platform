@@ -16,6 +16,7 @@ ai_bp = Blueprint("ai", __name__)
 
 # AI Cache configuration
 AI_CACHE_TTL_HOURS = int(os.getenv("AI_CACHE_TTL_HOURS", "24"))
+DISABLE_AI_CACHE = os.getenv("DISABLE_AI_CACHE", "false").lower() == "true"
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile")
 
@@ -152,7 +153,14 @@ def get_or_compute_ai_response(prompt: str, model: str, parameters: dict, comput
 
     This prevents the thundering herd problem where multiple concurrent requests
     for the same cache key all miss the cache and hit the API simultaneously.
+
+    Set DISABLE_AI_CACHE=true in environment to bypass cache entirely.
     """
+    # Bypass cache entirely if disabled
+    if DISABLE_AI_CACHE:
+        logging.info("AI cache disabled, computing response directly")
+        return compute_fn(prompt, model)
+
     cache_key = generate_cache_key(prompt, model, parameters)
     lock = get_cache_lock(cache_key)
 
@@ -1418,18 +1426,22 @@ NOTE: severity must be High, Medium, or Low. Provide comprehensive, accessible n
         was_cached = False
         if finding_id or finding_text:
             # Check cache first - if hit, use it directly to accurately track cache status
-            cached = get_cached_ai_response(prompt, GROQ_MODEL, cache_parameters)
-            if cached is not None:
-                was_cached = True
-                ai_response = cached
+            if DISABLE_AI_CACHE:
+                # Bypass cache entirely
+                ai_response = call_llm_api(prompt)
             else:
-                # Cache miss - compute and cache
-                ai_response = get_or_compute_ai_response(
-                    prompt=prompt,
-                    model=GROQ_MODEL,
-                    parameters=cache_parameters,
-                    compute_fn=lambda p, m: call_llm_api(p, m)
-                )
+                cached = get_cached_ai_response(prompt, GROQ_MODEL, cache_parameters)
+                if cached is not None:
+                    was_cached = True
+                    ai_response = cached
+                else:
+                    # Cache miss - compute and cache
+                    ai_response = get_or_compute_ai_response(
+                        prompt=prompt,
+                        model=GROQ_MODEL,
+                        parameters=cache_parameters,
+                        compute_fn=lambda p, m: call_llm_api(p, m)
+                    )
         else:
             # No caching for generic "all findings" request
             ai_response = call_llm_api(prompt)
