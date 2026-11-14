@@ -109,10 +109,17 @@ export default function PublicLayout() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <header className="sticky top-0 z-30 bg-forest-900 backdrop-blur border-b border-forest-700">
+      <header className="sticky top-0 z-30 bg-forest-800 backdrop-blur border-b border-forest-600">
         <div className="max-w-content mx-auto px-4 sm:px-6 flex items-center justify-between h-16">
+          {/* Admin link on extreme left */}
+          <div className="hidden lg:flex items-center mr-8">
+            <Link to="/admin/login" className="text-sm text-forest-100 hover:text-white flex items-center gap-1.5 font-medium">
+              <Shield size={14} /> Admin
+            </Link>
+          </div>
+
           <Link to="/" className="flex items-center gap-2 shrink-0">
-            <span className="flex h-8 w-8 items-center justify-center rounded bg-forest-700 text-white">
+            <span className="flex h-8 w-8 items-center justify-center rounded bg-forest-600 text-white">
               <Landmark size={16} />
             </span>
             <span className="font-serif font-semibold text-white leading-tight text-[15px]">
@@ -126,12 +133,6 @@ export default function PublicLayout() {
               <Dropdown key={group.label} group={group} isMobile={false} />
             ))}
           </nav>
-
-          <div className="hidden lg:flex items-center">
-            <Link to="/admin/login" className="text-sm text-forest-200 hover:text-white flex items-center gap-1.5">
-              <Shield size={14} /> Admin
-            </Link>
-          </div>
 
           {/* Mobile Menu Button */}
           <button className="lg:hidden p-2 text-forest-200" onClick={() => setMobileOpen(!mobileOpen)} aria-label="Toggle menu">
@@ -167,7 +168,7 @@ export default function PublicLayout() {
 
 function Footer() {
   return (
-    <footer className="border-t border-line/50 bg-ink mt-20">
+    <footer className="border-t border-forest-600/50 bg-forest-900 mt-20">
       <div className="max-w-content mx-auto px-4 sm:px-6 py-12 grid grid-cols-2 md:grid-cols-4 gap-8">
         <div className="col-span-2">
           <p className="font-serif font-semibold text-white mb-2">Nyeri Accountability Platform</p>
