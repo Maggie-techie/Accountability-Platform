@@ -210,7 +210,7 @@ def call_llm_api(prompt: str, model: str = None) -> dict:
             }
         ],
         "temperature": 0.2,
-        "max_tokens": 4000,
+        "max_tokens": 8000,
         "response_format": {"type": "json_object"}
     }
 
@@ -261,7 +261,7 @@ def call_llm_api(prompt: str, model: str = None) -> dict:
                     logging.error(f"Failed to parse Groq response as JSON: {e}")
                     logging.error(f"Finish reason: {finish_reason}")
                     logging.error(f"Response content: {content[:500]}")
-                    return _error("Failed to parse Groq response", f"Groq API returned invalid JSON: {str(e)}")
+                    return _error("Failed to parse Groq response", "Groq API returned invalid JSON")
             else:
                 logging.error("No choices in Groq API response")
                 return _error("Empty response from Groq API", "The Groq API returned no choices")
@@ -568,7 +568,7 @@ def validate_and_extract_data(constituency_slug: str | None = None) -> dict:
 
     except Exception as e:
         logging.error(f"Failed to validate and extract data: {e}")
-        return {"error": f"Failed to extract data: {str(e)}"}
+        return {"error": "Failed to extract data"}
 
 
 # MP AI Modules
@@ -592,18 +592,19 @@ Constituency Summary:
 Governor Summary:
 {governor_summary}
 
-Return ONLY a JSON object with exactly this structure:
+Return ONLY a JSON object with exactly this structure (all keys required):
 {{
   "narrative_fields": {{
-    "risk_level": "string (e.g., Low, Medium, High)",
-    "summary": "string (brief summary of risk factors)"
+    "risk_level": "Medium",
+    "summary": "Brief summary of risk factors"
   }},
   "chart_data": {{
-    "risk_score": number (0-100 for gauge visualization),
-    "peer_scores": [{{"constituent": "string", "score": number}}],
-    "allocation_trend": [{{"fy": "string", "amount": number, "anomaly_flag": boolean}}]
+    "risk_score": 75,
+    "peer_scores": [{{"constituent": "Constituency Name", "score": 65}}],
+    "allocation_trend": [{{"fy": "2023/24", "amount": 120, "anomaly_flag": false}}]
   }}
 }}
+NOTE: risk_score must be 0-100. peer_scores is an array of objects. allocation_trend anomaly_flag is boolean.
 """
 
         cache_parameters = {"constituency_slug": constituency_slug, "module": "risk_score"}
@@ -648,17 +649,18 @@ Constituency Summary:
 Governor Summary:
 {governor_summary}
 
-Return ONLY a JSON object with exactly this structure:
+Return ONLY a JSON object with exactly this structure (all keys required):
 {{
   "narrative_fields": {{
-    "summary": "string (explanation of risk level)",
-    "anomalies": "string (description of any anomalies found)",
-    "citizen_actions": "string (recommended actions for citizens)"
+    "summary": "Explanation of risk level",
+    "anomalies": "Description of any anomalies found",
+    "citizen_actions": "Recommended actions for citizens"
   }},
   "chart_data": {{
-    "peer_scores": [{{"constituent": "string", "score": number}}]
+    "peer_scores": [{{"constituent": "Constituency Name", "score": 65}}]
   }}
 }}
+NOTE: peer_scores is an array of objects with constituent (string) and score (number).
 """
 
         cache_parameters = {"constituency_slug": constituency_slug, "module": "risk_level"}
@@ -703,15 +705,16 @@ Constituency Summary:
 Governor Summary:
 {governor_summary}
 
-Return ONLY a JSON object with exactly this structure:
+Return ONLY a JSON object with exactly this structure (all keys required):
 {{
   "narrative_fields": {{
-    "summary": "string (comprehensive summary of constituency performance)"
+    "summary": "Comprehensive summary of constituency performance"
   }},
   "chart_data": {{
-    "key_metrics": [{{"label": "string", "value": number}}]
+    "key_metrics": [{{"label": "Total Allocations", "value": 500}}]
   }}
 }}
+NOTE: key_metrics is an array of objects with label (string) and value (number).
 """
 
         cache_parameters = {"constituency_slug": constituency_slug, "module": "summary"}
@@ -783,7 +786,12 @@ def mp_anomalies(constituency_slug):
                 audit_context += f"- {finding.get('note') or finding.get('finding', 'Misappropriation found')}"
                 audit_context += f" [FY: {finding.get('fy_reviewed', 'Unknown')}]"
                 if finding.get('amount_at_risk'):
-                    audit_context += f" Amount at risk: {finding['amount_at_risk']}"
+                    # Handle both numeric and string values (e.g., "KSh 5M")
+                    amt = finding['amount_at_risk']
+                    if isinstance(amt, (int, float)):
+                        audit_context += f" Amount at risk: KSh {amt:,.0f}M"
+                    else:
+                        audit_context += f" Amount at risk: {amt}"
                 audit_context += "\n"
         else:
             audit_context = "\n\nNo high-severity audit findings (misappropriations) found."
@@ -808,21 +816,18 @@ Constituency Summary:
 Governor Summary:
 {governor_summary}
 
-Return ONLY a JSON object with exactly this structure:
+Return ONLY a JSON object with exactly this structure (all keys required):
 {{
   "narrative_fields": {{
-    "summary": "string (plain-language summary of GNN anomalies AND high-severity audit findings for citizens)",
-    "details": "string (detailed explanation combining GNN findings and audit misappropriations, why they matter, and recommended actions)"
+    "summary": "Plain-language summary of GNN anomalies and high-severity audit findings for citizens",
+    "details": "Detailed explanation combining GNN findings and audit misappropriations, why they matter, and recommended actions"
   }},
   "chart_data": {{
-    "anomaly_points": [{{"fy": "string", "metric": "string", "value": number, "expected": number}}],
-    "normal_range": [{{"fy": "string", "min": number, "max": number}}]
+    "anomaly_points": [{{"fy": "2023/24", "metric": "Audit Misappropriation", "value": 50, "expected": 0}}],
+    "normal_range": [{{"fy": "2023/24", "min": 0, "max": 10}}]
   }}
 }}
-
-For anomaly_points, extract data from BOTH GNN anomalies and high-severity audit findings above.
-Include audit misappropriations as anomaly points with metric "Audit Misappropriation".
-For normal_range, provide typical ranges for the metrics based on the constituency's historical data.
+NOTE: anomaly_points is an array of objects with fy (string), metric (string), value (number), expected (number). normal_range is an array of objects with fy (string), min (number), max (number).
 """
 
         cache_parameters = {"constituency_slug": constituency_slug, "module": "anomalies"}
@@ -867,17 +872,18 @@ Constituency Summary:
 Governor Summary:
 {governor_summary}
 
-Return ONLY a JSON object with exactly this structure:
+Return ONLY a JSON object with exactly this structure (all keys required):
 {{
   "narrative_fields": {{
-    "ranking_explanation": "string (explanation of ranking methodology)",
-    "insights": "string (key insights from peer comparison)"
+    "ranking_explanation": "Explanation of ranking methodology",
+    "insights": "Key insights from peer comparison"
   }},
   "chart_data": {{
-    "peer_scores": [{{"constituent": "string", "score": number}}],
-    "ranking_distribution": {{"excellent": number, "good": number, "average": number, "poor": number, "very_poor": number}}
+    "peer_scores": [{{"constituent": "Constituency Name", "score": 65}}],
+    "ranking_distribution": {{"excellent": 2, "good": 5, "average": 10, "poor": 3, "very_poor": 1}}
   }}
 }}
+NOTE: peer_scores is an array of objects. ranking_distribution is an object with counts for each category.
 """
 
         cache_parameters = {"constituency_slug": constituency_slug, "module": "peer_rank"}
@@ -922,17 +928,18 @@ Constituency Summary:
 Governor Summary:
 {governor_summary}
 
-Return ONLY a JSON object with exactly this structure:
+Return ONLY a JSON object with exactly this structure (all keys required):
 {{
   "narrative_fields": {{
-    "recommended_actions": "string (detailed recommended actions)",
-    "priority_level": "string (High/Medium/Low priority)"
+    "recommended_actions": "Detailed recommended actions for citizens",
+    "priority_level": "High"
   }},
   "chart_data": {{
-    "action_effectiveness": [{{"action": "string", "effectiveness": number, "cost": number}}],
-    "implementation_timeline": [{{"phase": "string", "duration": number}}]
+    "action_effectiveness": [{{"action": "Attend public hearings", "effectiveness": 80, "cost": 10}}],
+    "implementation_timeline": [{{"phase": "Immediate", "duration": 1}}]
   }}
 }}
+NOTE: action_effectiveness is an array of objects with action (string), effectiveness (0-100), cost (0-100). implementation_timeline is an array of objects with phase (string), duration (number of months). priority_level must be High, Medium, or Low.
 """
 
         cache_parameters = {"constituency_slug": constituency_slug, "module": "citizen_actions"}
@@ -977,17 +984,18 @@ Constituency Summary:
 Governor Summary:
 {governor_summary}
 
-Return ONLY a JSON object with exactly this structure:
+Return ONLY a JSON object with exactly this structure (all keys required):
 {{
   "narrative_fields": {{
-    "data_quality_assessment": "string (overall data quality rating)",
-    "source_reliability": "string (assessment of source reliability)"
+    "data_quality_assessment": "Good",
+    "source_reliability": "Official government sources are reliable"
   }},
   "chart_data": {{
-    "source_scores": [{{"source": "string", "reliability": number, "completeness": number}}],
-    "data_gaps": [{{"gap_type": "string", "severity": number}}]
+    "source_scores": [{{"source": "Auditor-General Reports", "reliability": 90, "completeness": 85}}],
+    "data_gaps": [{{"gap_type": "Missing quarterly updates", "severity": 30}}]
   }}
 }}
+NOTE: source_scores is an array of objects with source (string), reliability (0-100), completeness (0-100). data_gaps is an array of objects with gap_type (string), severity (0-100).
 """
 
         cache_parameters = {"constituency_slug": constituency_slug, "module": "data_sources"}
@@ -1068,19 +1076,20 @@ Assess overall financial stability, sustainability, and performance.
 Governor Data Summary:
 {governor_summary}
 
-Return ONLY a JSON object with exactly this structure:
+Return ONLY a JSON object with exactly this structure (all keys required):
 {{
   "narrative_fields": {{
-    "health_level": "string (e.g., Strong, Moderate, Weak)",
-    "budget_summary": "string (summary of budget performance)",
-    "osr_analysis": "string (Own Source Revenue analysis)"
+    "health_level": "Moderate",
+    "budget_summary": "Summary of budget performance",
+    "osr_analysis": "Own Source Revenue analysis"
   }},
   "chart_data": {{
-    "health_score": number (0-100 for gauge visualization),
-    "revenue_trend": [{{"fy": "string", "equitable": number, "conditional": number, "osr": number, "health": number}}],
-    "osr_trend": [{{"fy": "string", "target": number, "actual": number}}]
+    "health_score": 65,
+    "revenue_trend": [{{"fy": "2023/24", "equitable": 5.2, "conditional": 1.1, "osr": 0.8, "health": 65}}],
+    "osr_trend": [{{"fy": "2023/24", "target": 1.0, "actual": 0.8}}]
   }}
 }}
+NOTE: health_score must be 0-100. health_level must be Strong, Moderate, or Weak. revenue_trend is an array of objects. osr_trend is an array of objects with target and actual (numbers).
 """
 
         cache_parameters = {"module": "fiscal_health"}
@@ -1118,16 +1127,17 @@ Assess how well departments are utilizing their allocated budgets.
 Governor Data Summary:
 {governor_summary}
 
-Return ONLY a JSON object with exactly this structure:
+Return ONLY a JSON object with exactly this structure (all keys required):
 {{
   "narrative_fields": {{
-    "risk_flag": "string (overall risk indicator)",
-    "projections": "string (year-end projection explanations)"
+    "risk_flag": "Medium",
+    "projections": "Year-end projection explanations"
   }},
   "chart_data": {{
-    "dept_absorption": [{{"name": "string", "pct": number, "risk_level": "string"}}]
+    "dept_absorption": [{{"name": "Health", "pct": 75, "risk_level": "Low"}}]
   }}
 }}
+NOTE: risk_flag must be Low, Medium, or High. dept_absorption is an array of objects with name (string), pct (0-100), risk_level (Low/Medium/High).
 """
 
         cache_parameters = {"module": "dept_absorption"}
@@ -1165,17 +1175,18 @@ Evaluate the county's ability to generate revenue from local sources.
 Governor Data Summary:
 {governor_summary}
 
-Return ONLY a JSON object with exactly this structure:
+Return ONLY a JSON object with exactly this structure (all keys required):
 {{
   "narrative_fields": {{
-    "osr_performance": "string (assessment of OSR performance)",
-    "trend_analysis": "string (analysis of OSR trends over time)"
+    "osr_performance": "Assessment of OSR performance",
+    "trend_analysis": "Analysis of OSR trends over time"
   }},
   "chart_data": {{
-    "osr_breakdown": [{{"source": "string", "amount": number, "percentage": number}}],
-    "osr_growth": [{{"fy": "string", "growth_rate": number}}]
+    "osr_breakdown": [{{"source": "Property Tax", "amount": 500, "percentage": 60}}],
+    "osr_growth": [{{"fy": "2023/24", "growth_rate": 5.2}}]
   }}
 }}
+NOTE: osr_breakdown is an array of objects with source (string), amount (number), percentage (0-100). osr_growth is an array of objects with fy (string), growth_rate (number).
 """
 
         cache_parameters = {"module": "osr_analysis"}
@@ -1213,17 +1224,18 @@ Highlight departments that require attention or intervention.
 Governor Data Summary:
 {governor_summary}
 
-Return ONLY a JSON object with exactly this structure:
+Return ONLY a JSON object with exactly this structure (all keys required):
 {{
   "narrative_fields": {{
-    "flags_summary": "string (summary of identified flags)",
-    "recommendations": "string (recommended actions for flagged departments)"
+    "flags_summary": "Summary of identified flags",
+    "recommendations": "Recommended actions for flagged departments"
   }},
   "chart_data": {{
-    "dept_risk_scores": [{{"name": "string", "risk_score": number, "risk_level": "string"}}],
-    "trend_indicators": [{{"name": "string", "trend": "string", "significance": number}}]
+    "dept_risk_scores": [{{"name": "Health", "risk_score": 30, "risk_level": "Low"}}],
+    "trend_indicators": [{{"name": "Education", "trend": "improving", "significance": 75}}]
   }}
 }}
+NOTE: dept_risk_scores is an array of objects with name (string), risk_score (0-100), risk_level (Low/Medium/High). trend_indicators is an array of objects with name (string), trend (string), significance (0-100).
 """
 
         cache_parameters = {"module": "department_flags"}
@@ -1261,17 +1273,18 @@ Assess financial, operational, and governance risks that could impact service de
 Governor Data Summary:
 {governor_summary}
 
-Return ONLY a JSON object with exactly this structure:
+Return ONLY a JSON object with exactly this structure (all keys required):
 {{
   "narrative_fields": {{
-    "top_risks": "string (description of top risks)",
-    "citizen_guidance": "string (guidance for citizen engagement)"
+    "top_risks": "Description of top risks",
+    "citizen_guidance": "Guidance for citizen engagement"
   }},
   "chart_data": {{
-    "risk_matrix": [{{"risk": "string", "impact": number, "likelihood": number}}],
-    "action_impact": [{{"action": "string", "impact": number, "feasibility": number}}]
+    "risk_matrix": [{{"risk": "Budget shortfall", "impact": 80, "likelihood": 60}}],
+    "action_impact": [{{"action": "Public hearings", "impact": 70, "feasibility": 85}}]
   }}
 }}
+NOTE: risk_matrix is an array of objects with risk (string), impact (0-100), likelihood (0-100). action_impact is an array of objects with action (string), impact (0-100), feasibility (0-100).
 """
 
         cache_parameters = {"module": "top_risks"}
@@ -1325,18 +1338,19 @@ Governor Data Summary:
 Constituency Data Summary:
 {constituency_summary}
 
-Return ONLY a JSON object with exactly this structure:
+Return ONLY a JSON object with exactly this structure (all keys required):
 {{
   "narrative_fields": {{
-    "mp_paragraph": "string (NG-CDF/MP perspective narrative)",
-    "governor_paragraph": "string (county executive perspective narrative)",
-    "county_health_score": number (0-100 for doughnut gauge visualization)
+    "mp_paragraph": "NG-CDF/MP perspective narrative",
+    "governor_paragraph": "County executive perspective narrative",
+    "county_health_score": 70
   }},
   "chart_data": {{
-    "cross_leader_anomalies": [{{"type": "string", "description": "string", "severity": number}}],
-    "constituency_risk_scores": [{{"name": "string", "score": number}}]
+    "cross_leader_anomalies": [{{"type": "Budget mismatch", "description": "Description of anomaly", "severity": 60}}],
+    "constituency_risk_scores": [{{"name": "Constituency Name", "score": 45}}]
   }}
 }}
+NOTE: county_health_score must be 0-100. cross_leader_anomalies is an array of objects with type (string), description (string), severity (0-100). constituency_risk_scores is an array of objects with name (string), score (0-100).
 """
 
         cache_parameters = {"module": "county_narrative"}
@@ -1382,18 +1396,19 @@ Focus on the following finding: {finding_text or finding_id or "all audit findin
 Governor Data Summary:
 {governor_summary}
 
-Return ONLY a JSON object with exactly this structure:
+Return ONLY a JSON object with exactly this structure (all keys required):
 {{
   "narrative_fields": {{
-    "severity": "string (High/Medium/Low overall severity)",
-    "plain_english_summary": "string (accessible summary of findings)",
-    "recommended_action": "string (recommended course of action)"
+    "severity": "High",
+    "plain_english_summary": "Accessible summary of findings",
+    "recommended_action": "Recommended course of action"
   }},
   "chart_data": {{
-    "severity_counts": {{"high": number, "medium": number, "low": number}},
-    "findings_by_constituency": [{{"name": "string", "count": number}}]
+    "severity_counts": {{"high": 5, "medium": 10, "low": 15}},
+    "findings_by_constituency": [{{"name": "Constituency Name", "count": 3}}]
   }}
 }}
+NOTE: severity must be High, Medium, or Low. severity_counts is an object with high, medium, low (numbers). findings_by_constituency is an array of objects with name (string), count (number).
 """
 
         cache_parameters = {
@@ -1404,15 +1419,19 @@ Return ONLY a JSON object with exactly this structure:
 
         was_cached = False
         if finding_id or finding_text:
+            # Check cache first - if hit, use it directly to accurately track cache status
             cached = get_cached_ai_response(prompt, GROQ_MODEL, cache_parameters)
             if cached is not None:
                 was_cached = True
-            ai_response = get_or_compute_ai_response(
-                prompt=prompt,
-                model=GROQ_MODEL,
-                parameters=cache_parameters,
-                compute_fn=lambda p, m: call_llm_api(p, m)
-            )
+                ai_response = cached
+            else:
+                # Cache miss - compute and cache
+                ai_response = get_or_compute_ai_response(
+                    prompt=prompt,
+                    model=GROQ_MODEL,
+                    parameters=cache_parameters,
+                    compute_fn=lambda p, m: call_llm_api(p, m)
+                )
         else:
             # No caching for generic "all findings" request
             ai_response = call_llm_api(prompt)
@@ -1443,31 +1462,65 @@ def compare_leaders():
         leader2_type = request_data.get("leader2_type", "constituency")
         leader2_id = request_data.get("leader2_id")
 
-        # Extract data using summaries only (not raw JSON)
-        data1 = validate_and_extract_data(leader1_id if leader1_type == "constituency" else None)
-        if "error" in data1:
-            return jsonify({"error": data1["error"]}), 404
-
-        data2 = {}
+        # Validate constituency exists if needed (lightweight check)
+        if leader1_type == "constituency" and leader1_id:
+            if not validate_constituency_exists(leader1_id):
+                return jsonify({"error": f"Constituency not found: {leader1_id}"}), 404
         if leader2_type == "constituency" and leader2_id:
-            data2 = validate_and_extract_data(leader2_id)
-            if "error" in data2:
-                return jsonify({"error": data2["error"]}), 404
-        elif leader2_type == "governor":
-            # Fetch governor data directly (without constituency filter)
-            data2 = validate_and_extract_data(None)
-            if "error" in data2:
-                return jsonify({"error": data2["error"]}), 404
+            if not validate_constituency_exists(leader2_id):
+                return jsonify({"error": f"Constituency not found: {leader2_id}"}), 404
 
-        # Generate concise summaries instead of dumping raw JSON
-        def get_leader_summary(data, leader_type, leader_id):
+        # Compute chart data from database (not LLM)
+        def compute_radar_data():
+            db = get_db()
+            radar = {"mp_track": {}, "governor_track": {}}
+
+            # MP track data
+            if leader1_type == "constituency" and leader1_id:
+                allocs = list(db.allocations.find({"constituency_slug": leader1_id}))
+                audits = list(db.audit_findings.find({"constituency_slug": leader1_id}))
+                radar["mp_track"]["allocation"] = sum(a.get('amount_kshm', 0) for a in allocs)
+                radar["mp_track"]["audit_findings"] = sum(1 for a in audits if a.get('finding_type') == 'misappropriation')
+                radar["mp_track"]["correct_appropriations"] = len(allocs) - radar["mp_track"]["audit_findings"]
+            elif leader2_type == "constituency" and leader2_id:
+                allocs = list(db.allocations.find({"constituency_slug": leader2_id}))
+                audits = list(db.audit_findings.find({"constituency_slug": leader2_id}))
+                radar["mp_track"]["allocation"] = sum(a.get('amount_kshm', 0) for a in allocs)
+                radar["mp_track"]["audit_findings"] = sum(1 for a in audits if a.get('finding_type') == 'misappropriation')
+                radar["mp_track"]["correct_appropriations"] = len(allocs) - radar["mp_track"]["audit_findings"]
+            else:
+                radar["mp_track"]["allocation"] = 0
+                radar["mp_track"]["audit_findings"] = 0
+                radar["mp_track"]["correct_appropriations"] = 0
+
+            # Governor track data
+            finances = list(db.county_finances.find({}))
+            gov_audits = list(db.county_audit.find({}))
+            departments = list(db.department_absorption.find({}))
+
+            radar["governor_track"]["allocation"] = sum(f.get('equitable_share_kshb', 0) + f.get('conditional_grants_kshb', 0) + f.get('osr_kshb', 0) for f in finances)
+            radar["governor_track"]["audit_findings"] = sum(1 for a in gov_audits if a.get('finding_type') == 'misappropriation')
+            radar["governor_track"]["correct_appropriations"] = len(finances) * 3 - radar["governor_track"]["audit_findings"]  # rough estimate
+            radar["governor_track"]["absorption_rate"] = sum(d.get('absorption_rate', 0) for d in departments) / len(departments) if departments else 0
+            radar["governor_track"]["fiscal_health"] = 100 - min(100, radar["governor_track"]["audit_findings"] * 5)  # simple heuristic
+
+            # MP track absorption (constituency level doesn't have absorption, use placeholder)
+            radar["mp_track"]["absorption_rate"] = 50
+            radar["mp_track"]["fiscal_health"] = 100 - min(100, radar["mp_track"]["audit_findings"] * 10)
+
+            return radar
+
+        radar_data = compute_radar_data()
+
+        # Generate concise summaries for narrative
+        def get_leader_summary(leader_type, leader_id):
             if leader_type == "constituency":
                 return generate_constituency_summary(leader_id, "compare")
             else:
                 return generate_governor_summary("compare")
 
-        leader1_summary = get_leader_summary(data1, leader1_type, leader1_id)
-        leader2_summary = get_leader_summary(data2, leader2_type, leader2_id)
+        leader1_summary = get_leader_summary(leader1_type, leader1_id)
+        leader2_summary = get_leader_summary(leader2_type, leader2_id)
 
         prompt = f"""
 Compare MP (NG-CDF legislative) and Governor (county executive) performance across multiple dimensions.
@@ -1476,20 +1529,15 @@ Analyze allocation effectiveness, audit outcomes, correct appropriations, budget
 Leader 1 ({leader1_type}): {leader1_summary}
 Leader 2 ({leader2_type}): {leader2_summary}
 
-Return ONLY a JSON object with exactly this structure:
+Return ONLY a JSON object with exactly this structure (all keys required):
 {{
   "narrative_fields": {{
-    "comparative_analysis": "string (detailed comparison analysis)",
-    "stronger_track": "string (which track performs better overall)",
-    "reasoning": "string (explanation of reasoning behind assessment)"
-  }},
-  "chart_data": {{
-    "radar_data": {{
-      "mp_track": {{"allocation": number, "audit_findings": number, "correct_appropriations": number, "absorption_rate": number, "fiscal_health": number}},
-      "governor_track": {{"allocation": number, "audit_findings": number, "correct_appropriations": number, "absorption_rate": number, "fiscal_health": number}}
-    }}
+    "comparative_analysis": "Detailed comparison analysis",
+    "stronger_track": "MP",
+    "reasoning": "Explanation of reasoning behind assessment"
   }}
 }}
+NOTE: stronger_track must be MP or Governor. chart_data is computed server-side and will be merged with your response.
 """
 
         cache_parameters = {
@@ -1506,6 +1554,12 @@ Return ONLY a JSON object with exactly this structure:
             parameters=cache_parameters,
             compute_fn=lambda p, m: call_llm_api(p, m)
         )
+
+        if ai_response.get("_error"):
+            return jsonify({"success": False, "module": "compare", "error": "AI analysis failed"}), 502
+
+        # Merge server-computed chart data with LLM narrative
+        ai_response["chart_data"] = {"radar_data": radar_data}
 
         if ai_response.get("_error"):
             return jsonify({"success": False, "module": "compare", "error": ai_response["narrative_fields"]["details"]}), 502
