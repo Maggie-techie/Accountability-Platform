@@ -14,7 +14,8 @@ from .rag.assistant import assistant_bp
 from .core.auth import init_ai_auth_and_rate_limiting, require_auth, optional_auth
 
 # Create main AI blueprint
-ai_bp = Blueprint("ai", __name__, url_prefix="/api/ai")
+# url_prefix is set in app.py when registering: app.register_blueprint(ai_bp, url_prefix="/api/ai")
+ai_bp = Blueprint("ai", __name__)
 
 # Register sub-blueprints
 ai_bp.register_blueprint(mp_bp)
