@@ -467,6 +467,110 @@ MP: {mp.get('name', 'Unknown') if mp else 'Unknown'}
         return f"Error generating summary for {constituency_slug}"
 
 
+def validate_and_extract_data(constituency_slug: str | None = None) -> dict:
+    """
+    Extract and validate data for AI analysis.
+    Returns a dict with 'constituency' and 'governor' keys containing summary data.
+    If constituency_slug is None, only governor data is returned.
+    """
+    try:
+        db = get_db()
+        result = {"constituency": None, "governor": None}
+
+        if constituency_slug:
+            constituency = db.constituencies.find_one({"slug": constituency_slug})
+            if not constituency:
+                return {"error": f"Constituency not found: {constituency_slug}"}
+
+            allocations = list(db.allocations.find({"constituency_slug": constituency_slug}))
+            audit_findings = list(db.audit_findings.find({"constituency_slug": constituency_slug}))
+            mp = db.mps.find_one({"constituency_slug": constituency_slug})
+            gnn_anomalies = list(db.gnn_anomalies.find({"metadata.constituency_slug": constituency_slug}))
+
+            # Safely sum amount_at_risk handling potential string values
+            def safe_sum_amount(findings, field):
+                total = 0
+                for f in findings:
+                    val = f.get(field, 0)
+                    if isinstance(val, (int, float)):
+                        total += val
+                    elif isinstance(val, str):
+                        try:
+                            import re
+                            num = re.search(r'[\d,]+\.?\d*', val.replace(',', ''))
+                            if num:
+                                total += float(num.group())
+                        except (ValueError, AttributeError):
+                            pass
+                return total
+
+            total_alloc = sum(a.get('amount_kshm', 0) for a in allocations)
+            mis_count = sum(1 for a in audit_findings if a.get('finding_type') == 'misappropriation')
+            total_flagged = safe_sum_amount(audit_findings, 'amount_at_risk')
+
+            result["constituency"] = {
+                "name": constituency.get('name', constituency_slug),
+                "slug": constituency_slug,
+                "mp_name": mp.get('name', 'Unknown') if mp else 'Unknown',
+                "total_allocations_kshm": total_alloc,
+                "allocation_count": len(allocations),
+                "audit_findings_count": len(audit_findings),
+                "misappropriation_count": mis_count,
+                "total_flagged_kshm": total_flagged,
+                "allocations": [
+                    {
+                        "financial_year": a.get('financial_year', 'N/A'),
+                        "amount_kshm": a.get('amount_kshm', 0),
+                        "category": a.get('category', 'Unknown')
+                    }
+                    for a in allocations
+                ],
+                "gnn_anomalies_count": len(gnn_anomalies)
+            }
+
+        # Always include governor data
+        profile = db.county_leaders.find_one({})
+        finances = list(db.county_finances.find({}).sort("financial_year", 1))
+        audit_findings = list(db.county_audit.find({}))
+        departments = list(db.department_absorption.find({}))
+
+        total_flagged_gov = sum(a.get('amount_flagged_kshm', 0) for a in audit_findings if a.get('finding_type') == 'misappropriation')
+        mis_count_gov = sum(1 for a in audit_findings if a.get('finding_type') == 'misappropriation')
+
+        result["governor"] = {
+            "county_name": profile.get('name', 'Nyeri County') if profile else 'Nyeri County',
+            "financial_years": [
+                {
+                    "financial_year": f.get('financial_year', 'N/A'),
+                    "equitable_share_kshb": f.get('equitable_share_kshb', 0),
+                    "conditional_grants_kshb": f.get('conditional_grants_kshb', 0),
+                    "osr_kshb": f.get('osr_kshb', 0),
+                    "expenditure_kshb": f.get('expenditure_kshb', 0),
+                    "osr_target_kshb": f.get('osr_target_kshb', 0)
+                }
+                for f in finances
+            ],
+            "audit_findings_count": len(audit_findings),
+            "misappropriation_count": mis_count_gov,
+            "total_flagged_kshm": total_flagged_gov,
+            "departments": [
+                {
+                    "name": d.get('department', 'Unknown'),
+                    "absorption_rate": d.get('absorption_rate', 0),
+                    "budget_allocated_kshm": d.get('budget_allocated_kshm', 0),
+                    "expenditure_kshm": d.get('expenditure_kshm', 0)
+                }
+                for d in departments
+            ]
+        }
+
+        return result
+
+    except Exception as e:
+        logging.error(f"Failed to validate and extract data: {e}")
+        return {"error": f"Failed to extract data: {str(e)}"}
+
+
 # MP AI Modules
 @ai_bp.route("/mp/<constituency_slug>/risk_score", methods=["GET"])
 def mp_risk_score(constituency_slug):
@@ -1350,8 +1454,10 @@ def compare_leaders():
             if "error" in data2:
                 return jsonify({"error": data2["error"]}), 404
         elif leader2_type == "governor":
-            # Governor data is always in data1 when leader1 is governor or we need it from data1
-            data2 = data1
+            # Fetch governor data directly (without constituency filter)
+            data2 = validate_and_extract_data(None)
+            if "error" in data2:
+                return jsonify({"error": data2["error"]}), 404
 
         # Generate concise summaries instead of dumping raw JSON
         def get_leader_summary(data, leader_type, leader_id):
