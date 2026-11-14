@@ -4,9 +4,14 @@ openpyxl
 flask
 flask-cors
 flask_jwt_extended
+flask-limiter
 dotenv
 torch
 torch-geometric
 scikit-learn
 numpy
 requests
+sentence-transformers
+pydantic
+pydantic-settings
+pydantic-ai-slim[groq]
