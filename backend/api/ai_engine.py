@@ -298,28 +298,28 @@ def call_claude_api(prompt: str, model: str = None) -> dict:
                         "sample_labels": []
                     }
                 }
-    except requests.exceptions.RequestException as e:
-        logging.error(f"Request to Groq API failed: {e}")
-        return {
-            "narrative_fields": {
-                "summary": "Error: Groq API request failed",
-                "details": f"Request error: {str(e)}"
+        except requests.exceptions.RequestException as e:
+            logging.error(f"Request to Groq API failed: {e}")
+            return {
+                "narrative_fields": {
+                    "summary": "Error: Groq API request failed",
+                    "details": f"Request error: {str(e)}"
             },
-            "chart_data": {
-                "sample_array": [],
-                "sample_labels": []
+                "chart_data": {
+                    "sample_array": [],
+                    "sample_labels": []
             }
         }
-    except Exception as e:
-        logging.error(f"Unexpected error in call_claude_api: {e}")
-        return {
-            "narrative_fields": {
-                "summary": "Error: Internal error in AI service",
-                "details": f"Unexpected error: {str(e)}"
+        except Exception as e:
+            logging.error(f"Unexpected error in call_claude_api: {e}")
+            return {
+                "narrative_fields": {
+                    "summary": "Error: Internal error in AI service",
+                    "details": f"Unexpected error: {str(e)}"
             },
-            "chart_data": {
-                "sample_array": [],
-                "sample_labels": []
+                "chart_data": {
+                    "sample_array": [],
+                    "sample_labels": []
             }
         }
 
