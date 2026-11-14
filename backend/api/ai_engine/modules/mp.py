@@ -12,7 +12,7 @@ from ..core.prompts import (
 from ..data.access import data_access
 
 # Create blueprint
-mp_bp = Blueprint("mp", __name__, url_prefix="/api/ai/mp")
+mp_bp = Blueprint("mp", __name__, url_prefix="/mp")
 
 
 # ============================================================

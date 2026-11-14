@@ -8,7 +8,7 @@ from ..core.prompts import generate_governor_summary
 from ..data.access import data_access
 
 # Create blueprint
-governor_bp = Blueprint("governor", __name__, url_prefix="/api/ai/governor")
+governor_bp = Blueprint("governor", __name__, url_prefix="/governor")
 
 
 # ============================================================

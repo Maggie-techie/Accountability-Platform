@@ -11,3 +11,4 @@ torch-geometric
 scikit-learn
 numpy
 requests
+sentence-transformers

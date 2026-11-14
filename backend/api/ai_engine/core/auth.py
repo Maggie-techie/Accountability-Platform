@@ -146,7 +146,7 @@ def init_ai_auth_and_rate_limiting(app, ai_blueprint):
     # Different limits for different endpoint groups
 
     # Health/version - exempt
-    limiter.exempt(ai_blueprint, methods=["GET"])
+    limiter.exempt(ai_blueprint)
 
     # MP endpoints - 30/min
     from api.ai_engine.modules.mp import mp_bp

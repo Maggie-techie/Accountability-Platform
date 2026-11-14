@@ -4,7 +4,8 @@ Retrieves relevant data from MongoDB based on query intent.
 """
 import logging
 import re
-from typing import Optional
+import os
+from typing import Optional, List, Dict, Any
 from api.ai_engine.data.access import data_access
 
 logger = logging.getLogger(__name__)
@@ -74,6 +75,7 @@ def retrieve_relevant_data(
 ) -> dict:
     """
     Retrieve relevant data from MongoDB based on query intent.
+    Includes semantic search enhancement when enabled.
 
     Args:
         query: User's question
@@ -143,10 +145,103 @@ def retrieve_relevant_data(
             if depts:
                 data['departments'] = depts
 
+        # Semantic search enhancement
+        if semantic_retriever.enabled:
+            semantic_results = _semantic_search_enhancement(query, intent, constituency_slug)
+            if semantic_results:
+                data['semantic_results'] = semantic_results
+                logger.info(f"Semantic search added {len(semantic_results)} relevant documents")
+
     except Exception as e:
         logger.error(f"Error retrieving data for RAG: {e}")
 
     return data
+
+
+def _semantic_search_enhancement(
+    query: str,
+    intent: dict,
+    constituency_slug: Optional[str] = None
+) -> List[Dict[str, Any]]:
+    """
+    Enhance retrieval with semantic search based on intent.
+    Searches relevant collections for semantically similar content.
+    """
+    results = []
+
+    try:
+        # Determine which collections to search based on intent
+        collections_to_search = []
+
+        if intent.get("needs_audit"):
+            collections_to_search.append(("audit_findings", "finding_text"))
+        if intent.get("needs_financial"):
+            collections_to_search.append(("financial_records", "description"))
+        if intent.get("needs_project"):
+            collections_to_search.append(("projects", "description"))
+        if intent.get("needs_leader"):
+            collections_to_search.append(("governor_profile", "bio"))
+
+        # If no specific intent, search broad collections
+        if not collections_to_search:
+            collections_to_search = [
+                ("audit_findings", "finding_text"),
+                ("projects", "description"),
+                ("financial_records", "description"),
+            ]
+
+        # Search each collection
+        for collection_name, text_field in collections_to_search:
+            try:
+                # Try Atlas vector search first
+                atlas_results = semantic_retriever.search_mongodb_atlas(
+                    query, collection_name, limit=5
+                )
+                if atlas_results:
+                    for r in atlas_results:
+                        r['source_collection'] = collection_name
+                    results.extend(atlas_results)
+                    continue
+
+                # Fallback: load documents and search in-memory
+                # Only if collection is not too large
+                db = data_access.db
+                collection = db[collection_name]
+                count = collection.count_documents({})
+
+                # Only do in-memory search for reasonably sized collections
+                if count <= 1000:
+                    docs = list(collection.find().limit(500))
+                    for doc in docs:
+                        doc['_id'] = str(doc.get('_id', ''))
+
+                    mem_results = semantic_retriever.search_in_memory(
+                        query, docs, text_field=text_field, limit=5
+                    )
+                    for r in mem_results:
+                        r['source_collection'] = collection_name
+                    results.extend(mem_results)
+
+            except Exception as e:
+                logger.debug(f"Semantic search on {collection_name} failed: {e}")
+                continue
+
+        # Deduplicate by _id
+        seen = set()
+        unique_results = []
+        for r in results:
+            rid = r.get('_id', '')
+            if rid and rid not in seen:
+                seen.add(rid)
+                unique_results.append(r)
+            elif not rid:
+                unique_results.append(r)
+
+        return unique_results[:10]  # Limit total results
+
+    except Exception as e:
+        logger.error(f"Semantic search enhancement failed: {e}")
+        return []
 
 
 def format_context_for_prompt(retrieved_data: dict) -> str:
@@ -241,47 +336,251 @@ def format_context_for_prompt(retrieved_data: dict) -> str:
                 f"Budget: KES {d.get('budget', 'N/A'):,}"
             )
 
+    # Semantic search results
+    if retrieved_data.get('semantic_results'):
+        sem_results = retrieved_data['semantic_results'][:5]
+        context_parts.append(f"\n=== SEMANTICALLY RELEVANT DOCUMENTS ({len(sem_results)} shown) ===")
+        for r in sem_results:
+            score = r.get('similarity_score', r.get('score', 0))
+            source = r.get('source_collection', 'unknown')
+            # Get text content from various possible fields
+            text = (r.get('finding_text') or r.get('description') or
+                   r.get('title') or r.get('text') or str(r)[:200])
+            context_parts.append(
+                f"  - [{source}, relevance: {score:.2f}] {text[:300]}"
+            )
+
     return "\n".join(context_parts) if context_parts else "No specific data retrieved."
 
 
 # ============================================================
-# Future: Semantic Search Integration
+# Semantic Search Implementation
 # ============================================================
 
 class SemanticRetriever:
     """
-    Placeholder for future semantic search integration.
-    Will use embeddings + vector search when enabled.
+    Semantic search using sentence-transformers embeddings.
+    Supports both in-memory vector search and MongoDB Atlas Vector Search.
     """
 
     def __init__(self):
         self.enabled = False
         self.embedding_model = None
-        self.vector_index = None
+        self.embedding_model_name = "sentence-transformers/all-MiniLM-L6-v2"
+        self._cache = {}  # Simple in-memory cache for embeddings
 
-    def enable(self, embedding_model: str = "sentence-transformers/all-MiniLM-L6-v2"):
-        """Enable semantic search with specified embedding model."""
+    def enable(self, embedding_model: str = None) -> bool:
+        """
+        Enable semantic search with specified embedding model.
+        Returns True if successful, False otherwise.
+        """
+        if embedding_model:
+            self.embedding_model_name = embedding_model
+
         try:
             from sentence_transformers import SentenceTransformer
-            self.embedding_model = SentenceTransformer(embedding_model)
+            self.embedding_model = SentenceTransformer(self.embedding_model_name)
             self.enabled = True
-            logger.info(f"Semantic search enabled with {embedding_model}")
+            logger.info(f"Semantic search enabled with {self.embedding_model_name}")
+            return True
         except ImportError:
             logger.warning("sentence-transformers not installed, semantic search disabled")
+            self.enabled = False
+            return False
+        except Exception as e:
+            logger.error(f"Failed to enable semantic search: {e}")
+            self.enabled = False
+            return False
 
-    def embed_query(self, query: str) -> list:
+    def embed_query(self, query: str) -> List[float]:
         """Generate embedding for query."""
-        if not self.enabled:
+        if not self.enabled or not self.embedding_model:
             return []
-        return self.embedding_model.encode(query).tolist()
 
-    def search(self, query: str, collection: str, limit: int = 10) -> list:
-        """Search collection using vector similarity."""
+        # Check cache
+        if query in self._cache:
+            return self._cache[query]
+
+        embedding = self.embedding_model.encode(query).tolist()
+        # Cache with size limit
+        if len(self._cache) > 1000:
+            # Remove oldest entry
+            self._cache.pop(next(iter(self._cache)))
+        self._cache[query] = embedding
+        return embedding
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        """Generate embeddings for multiple documents."""
+        if not self.enabled or not self.embedding_model:
+            return []
+        return self.embedding_model.encode(texts).tolist()
+
+    def search_in_memory(
+        self,
+        query: str,
+        documents: List[Dict[str, Any]],
+        text_field: str = "text",
+        limit: int = 10,
+        threshold: float = 0.3
+    ) -> List[Dict[str, Any]]:
+        """
+        Search documents using cosine similarity in memory.
+
+        Args:
+            query: Search query
+            documents: List of dicts with text content
+            text_field: Field name containing text to search
+            limit: Maximum results
+            threshold: Minimum similarity score (0-1)
+
+        Returns:
+            List of matching documents with similarity scores
+        """
+        if not self.enabled or not documents:
+            return []
+
+        query_embedding = self.embed_query(query)
+        if not query_embedding:
+            return []
+
+        # Extract texts
+        texts = [doc.get(text_field, "") for doc in documents]
+        if not any(texts):
+            return []
+
+        doc_embeddings = self.embed_documents(texts)
+        if not doc_embeddings:
+            return []
+
+        # Compute cosine similarity
+        import numpy as np
+        query_vec = np.array(query_embedding)
+        doc_vecs = np.array(doc_embeddings)
+
+        # Normalize
+        query_norm = np.linalg.norm(query_vec)
+        doc_norms = np.linalg.norm(doc_vecs, axis=1)
+
+        # Avoid division by zero
+        doc_norms[doc_norms == 0] = 1
+        query_norm = query_norm if query_norm > 0 else 1
+
+        similarities = np.dot(doc_vecs, query_vec) / (doc_norms * query_norm)
+
+        # Get top results above threshold
+        results = []
+        for idx, score in enumerate(similarities):
+            if score >= threshold:
+                doc = documents[idx].copy()
+                doc['similarity_score'] = float(score)
+                results.append(doc)
+
+        # Sort by similarity descending
+        results.sort(key=lambda x: x['similarity_score'], reverse=True)
+        return results[:limit]
+
+    def search_mongodb_atlas(
+        self,
+        query: str,
+        collection_name: str,
+        limit: int = 10,
+        index_name: str = "vector_index"
+    ) -> List[Dict[str, Any]]:
+        """
+        Search using MongoDB Atlas Vector Search.
+        Requires MongoDB Atlas with vector search index configured.
+
+        Args:
+            query: Search query
+            collection_name: MongoDB collection name
+            limit: Maximum results
+            index_name: Vector search index name
+
+        Returns:
+            List of matching documents
+        """
         if not self.enabled:
             return []
-        # TODO: Implement with MongoDB Atlas Vector Search or pgvector
+
+        try:
+            query_embedding = self.embed_query(query)
+            if not query_embedding:
+                return []
+
+            db = data_access.db
+            collection = db[collection_name]
+
+            # MongoDB Atlas Vector Search pipeline
+            pipeline = [
+                {
+                    "$vectorSearch": {
+                        "index": index_name,
+                        "path": "embedding",
+                        "queryVector": query_embedding,
+                        "numCandidates": limit * 10,
+                        "limit": limit
+                    }
+                },
+                {
+                    "$project": {
+                        "embedding": 0,  # Don't return embeddings
+                        "score": {"$meta": "vectorSearchScore"}
+                    }
+                }
+            ]
+
+            results = list(collection.aggregate(pipeline))
+            logger.info(f"Vector search returned {len(results)} results from {collection_name}")
+            return results
+
+        except Exception as e:
+            logger.warning(f"MongoDB Atlas Vector Search failed: {e}")
+            return []
+
+    def search(
+        self,
+        query: str,
+        collection: str = None,
+        limit: int = 10,
+        documents: List[Dict[str, Any]] = None,
+        text_field: str = "text",
+        use_atlas: bool = False
+    ) -> List[Dict[str, Any]]:
+        """
+        Unified search interface.
+
+        Args:
+            query: Search query
+            collection: MongoDB collection name (for Atlas search)
+            limit: Maximum results
+            documents: Pre-loaded documents (for in-memory search)
+            text_field: Text field for in-memory search
+            use_atlas: Use MongoDB Atlas Vector Search
+
+        Returns:
+            List of matching documents
+        """
+        if not self.enabled:
+            logger.debug("Semantic search not enabled, returning empty results")
+            return []
+
+        # Try Atlas search first if enabled and collection provided
+        if use_atlas and collection:
+            results = self.search_mongodb_atlas(query, collection, limit)
+            if results:
+                return results
+
+        # Fallback to in-memory search if documents provided
+        if documents:
+            return self.search_in_memory(query, documents, text_field, limit)
+
         return []
 
 
-# Global instance for future use
+# Global instance
 semantic_retriever = SemanticRetriever()
+
+
+# Auto-enable if ENABLE_SEMANTIC_SEARCH env var is set
+if os.getenv("ENABLE_SEMANTIC_SEARCH", "false").lower() == "true":
+    semantic_retriever.enable()

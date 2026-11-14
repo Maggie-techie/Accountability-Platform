@@ -18,7 +18,7 @@ from ..rag.retrieval import (
 logger = logging.getLogger(__name__)
 
 # Create blueprint
-assistant_bp = Blueprint("assistant", __name__, url_prefix="/api/ai")
+assistant_bp = Blueprint("assistant", __name__, url_prefix="/assistant")
 
 
 def build_conversational_prompt(
@@ -93,7 +93,7 @@ def track_sources_used(retrieved_data: dict, constituency_slug: Optional[str]) -
     return sources_used
 
 
-@assistant_bp.route("/assistant", methods=["POST"])
+@assistant_bp.route("/", methods=["POST"])
 def ai_assistant():
     """
     Conversational AI Assistant endpoint with RAG.
@@ -159,7 +159,7 @@ def ai_assistant():
         return jsonify({"success": False, "error": "Internal server error"}), 500
 
 
-@assistant_bp.route("/assistant/intent", methods=["POST"])
+@assistant_bp.route("/intent", methods=["POST"])
 def detect_query_intent():
     """
     Debug endpoint to see what intent was detected for a query.

@@ -14,7 +14,7 @@ from ..core.prompts import (
 from ..data.access import data_access
 
 # Create blueprint
-county_bp = Blueprint("county", __name__, url_prefix="/api/ai")
+county_bp = Blueprint("county", __name__, url_prefix="")
 
 
 @county_bp.route("/county/narrative", methods=["GET"])
