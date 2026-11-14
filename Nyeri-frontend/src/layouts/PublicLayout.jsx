@@ -109,14 +109,14 @@ export default function PublicLayout() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <header className="sticky top-0 z-30 bg-ink backdrop-blur border-b border-line/50">
+      <header className="sticky top-0 z-30 bg-forest-900 backdrop-blur border-b border-forest-700">
         <div className="max-w-content mx-auto px-4 sm:px-6 flex items-center justify-between h-16">
           <Link to="/" className="flex items-center gap-2 shrink-0">
             <span className="flex h-8 w-8 items-center justify-center rounded bg-forest-700 text-white">
               <Landmark size={16} />
             </span>
             <span className="font-serif font-semibold text-white leading-tight text-[15px]">
-              Nyeri Accountability<span className="block text-[11px] font-sans font-normal text-white/60 -mt-0.5">Governance Platform</span>
+              Nyeri Accountability<span className="block text-[11px] font-sans font-normal text-forest-200 -mt-0.5">Governance Platform</span>
             </span>
           </Link>
 
@@ -128,20 +128,20 @@ export default function PublicLayout() {
           </nav>
 
           <div className="hidden lg:flex items-center">
-            <Link to="/admin/login" className="text-sm text-white/60 hover:text-white flex items-center gap-1.5">
+            <Link to="/admin/login" className="text-sm text-forest-200 hover:text-white flex items-center gap-1.5">
               <Shield size={14} /> Admin
             </Link>
           </div>
 
           {/* Mobile Menu Button */}
-          <button className="lg:hidden p-2 text-white/60" onClick={() => setMobileOpen(!mobileOpen)} aria-label="Toggle menu">
+          <button className="lg:hidden p-2 text-forest-200" onClick={() => setMobileOpen(!mobileOpen)} aria-label="Toggle menu">
             {mobileOpen ? <X size={22} /> : <Menu size={22} />}
           </button>
         </div>
 
         {/* Mobile Navigation */}
         {mobileOpen && (
-          <nav className="lg:hidden border-t border-line/50 bg-ink/50 px-4 py-3 flex flex-col gap-1">
+          <nav className="lg:hidden border-t border-forest-700 bg-forest-900/50 px-4 py-3 flex flex-col gap-1">
             {navGroups.map((group) => (
               <Dropdown
                 key={group.label}
@@ -149,7 +149,7 @@ export default function PublicLayout() {
                 isMobile={true}
               />
             ))}
-            <Link to="/admin/login" className="px-3 py-2.5 text-sm text-white/60 flex items-center gap-1.5">
+            <Link to="/admin/login" className="px-3 py-2.5 text-sm text-forest-200 flex items-center gap-1.5">
               <Shield size={14} /> Admin
             </Link>
           </nav>
