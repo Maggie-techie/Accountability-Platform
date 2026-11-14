@@ -90,7 +90,7 @@ def warm_constituency_cache(constituency_slugs=None):
                 """
 
                 # Call Claude API (this would be the real API call in production)
-                ai_response = call_claude_api(full_prompt)
+                ai_response = call_llm_api(full_prompt)
 
                 # Cache the response
                 cache_ai_response(
@@ -167,7 +167,7 @@ def warm_governor_cache():
                 """
 
                 # Call Claude API (this would be the real API call in production)
-                ai_response = call_claude_api(full_prompt)
+                ai_response = call_llm_api(full_prompt)
 
                 # Cache the response
                 cache_ai_response(
@@ -228,7 +228,7 @@ def warm_county_narrative_cache():
         """
 
         # Call Claude API (this would be the real API call in production)
-        ai_response = call_claude_api(full_prompt)
+        ai_response = call_llm_api(full_prompt)
 
         # Cache the response
         cache_ai_response(
@@ -285,7 +285,7 @@ def warm_finding_classifier_cache():
         """
 
         # Call Claude API (this would be the real API call in production)
-        ai_response = call_claude_api(full_prompt)
+        ai_response = call_llm_api(full_prompt)
 
         # Cache the response
         cache_ai_response(
@@ -343,7 +343,7 @@ def warm_cross_leader_comparator_cache():
         """
 
         # Call Claude API (this would be the real API call in production)
-        ai_response = call_claude_api(full_prompt)
+        ai_response = call_llm_api(full_prompt)
 
         # Cache the response
         cache_ai_response(
