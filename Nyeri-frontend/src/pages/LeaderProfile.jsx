@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { LineChart, Line, XAxis, YAxis, Tooltip as RTooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { FileDown, MessageCircleQuestion } from 'lucide-react'
@@ -43,23 +43,6 @@ function toLabel(key) {
     .replace(/\b\w/g, (c) => c.toUpperCase())
 }
 
-async function fetchAiModule(key, isGovernor) {
-  try {
-    const url = isGovernor
-      ? `${APIService.baseURL}/ai/governor/${key}`
-      : `${APIService.baseURL}/ai/mp/${slug}/${key}`
-    const res = await fetch(url)
-    const json = await res.json()
-    if (json?.success && json.data) {
-      return { narrative_fields: json.data.narrative_fields || {}, chart_data: json.data.chart_data || {} }
-    }
-    return null
-  } catch (err) {
-    console.warn(`Could not fetch AI module for key ${key}:`, err)
-    return null
-  }
-}
-
 export default function LeaderProfile() {
   const { slug } = useParams()
   const navigate = useNavigate()
@@ -74,6 +57,24 @@ export default function LeaderProfile() {
   const [governorScore, setGovernorScore] = useState(null)
   const [constituencyScore, setConstituencyScore] = useState(null)
   const [countyFinances, setCountyFinances] = useState(null)
+
+  // Fetch AI module data - defined inside component to access `slug` from useParams
+  const fetchAiModule = useCallback(async (key, isGovernor) => {
+    try {
+      const url = isGovernor
+        ? `${APIService.baseURL}/ai/governor/${key}`
+        : `${APIService.baseURL}/ai/mp/${slug}/${key}`
+      const res = await fetch(url)
+      const json = await res.json()
+      if (json?.success && json.data) {
+        return { narrative_fields: json.data.narrative_fields || {}, chart_data: json.data.chart_data || {} }
+      }
+      return null
+    } catch (err) {
+      console.warn(`Could not fetch AI module for key ${key}:`, err)
+      return null
+    }
+  }, [slug])
 
   useEffect(() => {
     const fetchData = async () => {
