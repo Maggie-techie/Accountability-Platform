@@ -417,7 +417,38 @@ export default function LeaderProfile() {
                       {Object.entries(mod.narrative_fields).map(([key, value]) => (
                         <div key={key}>
                           <p className="text-sm font-medium text-ink">{toLabel(key)}</p>
-                          <p className="text-sm text-ink-muted mt-0.5">{String(value)}</p>
+                          <div className="text-sm text-ink-muted mt-0.5">
+                            {Array.isArray(value) ? (
+                              <ul className="list-disc pl-4 space-y-1">
+                                {value.map((item, idx) => (
+                                  <li key={idx}>
+                                    {typeof item === 'object' && item !== null ? (
+                                      <>
+                                        <p className="font-medium">{item.title || item.name || item.department || 'Item'}</p>
+                                        {item.description && <p>{item.description}</p>}
+                                        {item.severity && <p className="text-xs">Severity: {item.severity}</p>}
+                                        {item.flag_type && <p className="text-xs">Type: {item.flag_type}</p>}
+                                        {item.amount_at_risk && <p className="text-xs">Amount at risk: {item.amount_at_risk}</p>}
+                                        {item.recommended_action && <p className="text-xs">Action: {item.recommended_action}</p>}
+                                        {item.narrative && <p className="text-xs">{item.narrative}</p>}
+                                        {item.rating && <p className="text-xs">Rating: {item.rating}</p>}
+                                        {item.performance && <p className="text-xs">Performance: {item.performance}</p>}
+                                        {item.target !== undefined && item.actual !== undefined && (
+                                          <p className="text-xs">Target: {item.target}, Actual: {item.actual}</p>
+                                        )}
+                                      </>
+                                    ) : (
+                                      String(item)
+                                    )}
+                                  </li>
+                                ))}
+                              </ul>
+                            ) : typeof value === 'object' && value !== null ? (
+                              <pre className="whitespace-pre-wrap text-xs bg-gray-50 p-2 rounded">{JSON.stringify(value, null, 2)}</pre>
+                            ) : (
+                              String(value)
+                            )}
+                          </div>
                         </div>
                       ))}
                     </div>
