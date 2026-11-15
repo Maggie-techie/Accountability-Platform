@@ -99,8 +99,8 @@ def get_finances():
         # Sort by financial_year
         result.sort(key=lambda x: x.get("financial_year", ""))
 
-        full_data = serializable_doc(result)
-        return jsonify(full_data), 200
+        # No _id fields in pivoted data, return directly
+        return jsonify(result), 200
     except Exception as e:
         return jsonify({"error": "Failed to retrieve finances", "details": str(e)}), 500
 
