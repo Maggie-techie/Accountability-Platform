@@ -1,8 +1,9 @@
+import { useState, useEffect } from 'react'
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, Tooltip as RTooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts'
 import { Card, Badge } from '../components/ui'
 import { Breadcrumbs, Table } from '../components/DataDisplay'
 import { KpiCard } from '../components/Insights'
-import { constituencies, allocationTrend, departments, anomalies, auditFindings } from '../data/mockData'
+import { allocationTrend, departments, anomalies, auditFindings } from '../data/mockData'
 import APIService from '../services/api'
 
 
@@ -12,8 +13,48 @@ const severityCounts = ['High', 'Medium', 'Low'].map((s) => ({
 const SEV_COLORS = { High: '#A6431F', Medium: '#C08A28', Low: '#2E6B44' }
 
 export default function AccountabilityDashboard() {
-  const avgScore = Math.round(constituencies.reduce((a, c) => a + c.accountabilityScore, 0) / constituencies.length)
+  const [constituencies, setConstituencies] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const data = await APIService.getAllConstituencyScores()
+        setConstituencies(data)
+      } catch (err) {
+        setError(err.message || 'Failed to load dashboard data')
+      } finally {
+        setLoading(false)
+      }
+    }
+    fetchData()
+  }, [])
+
+  const avgScore = constituencies.length > 0
+    ? Math.round(constituencies.reduce((a, c) => a + (c.accountabilityScore || 0), 0) / constituencies.length)
+    : 0
   const totalFlagged = auditFindings.reduce((a, f) => a + f.amountKshm, 0)
+
+  if (loading) {
+    return (
+      <div className="max-w-content mx-auto px-4 sm:px-6 py-8">
+        <Breadcrumbs items={[{ label: 'Accountability' }]} />
+        <h1 className="text-3xl font-semibold mb-1">Accountability dashboard</h1>
+        <p className="text-ink-muted mb-6 max-w-2xl">Loading dashboard...</p>
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="max-w-content mx-auto px-4 sm:px-6 py-8">
+        <Breadcrumbs items={[{ label: 'Accountability' }]} />
+        <h1 className="text-3xl font-semibold mb-1">Accountability dashboard</h1>
+        <p className="text-ink-danger mb-6">{error}</p>
+      </div>
+    )
+  }
 
   return (
     <div className="max-w-content mx-auto px-4 sm:px-6 py-8">

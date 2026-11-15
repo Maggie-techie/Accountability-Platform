@@ -1,7 +1,122 @@
 from flask import Blueprint, request, jsonify
 from api.database.connection import get_db
+from datetime import datetime
 
 constituency_bp = Blueprint("constituency", __name__)
+
+
+# Scoring model for constituencies/MPs
+def calculate_constituency_score(allocations, audit_findings, mp_data=None):
+    """
+    Calculate accountability score for a constituency/MP.
+
+    Factors:
+    1. Allocation utilization (30% weight) - based on correct vs misappropriation ratio
+    2. Audit findings severity (40% weight) - based on misappropriation findings and amounts
+    3. OAG opinion & audit status (30% weight) - based on audit opinion and status
+    """
+    # 1. Allocation utilization score (0-100)
+    # Ratio of correct appropriations to total findings
+    total_findings = len(audit_findings)
+    correct_findings = sum(
+        1 for a in audit_findings
+        if a.get("finding_type") == "correct_appropriation"
+    )
+    misappropriation_findings = sum(
+        1 for a in audit_findings
+        if a.get("finding_type") == "misappropriation"
+    )
+
+    if total_findings > 0:
+        utilization_ratio = correct_findings / total_findings
+        utilization_score = utilization_ratio * 100
+    else:
+        # No findings - neutral score
+        utilization_score = 50
+
+    # 2. Audit findings severity score (0-100)
+    # Based on misappropriation count and amount at risk
+    total_amount_at_risk = 0
+    for a in audit_findings:
+        if a.get("finding_type") == "misappropriation":
+            # Try to parse amount_at_risk (could be string like "KSh 5M" or number)
+            amount = a.get("amount_at_risk", 0)
+            if isinstance(amount, str):
+                import re
+                num_match = re.search(r'[\d,]+\.?\d*', amount.replace(',', ''))
+                if num_match:
+                    amount = float(num_match.group())
+                else:
+                    amount = 0
+            total_amount_at_risk += amount
+
+    # Normalize: assume 100M at risk = score of 0, 0 at risk = score of 100
+    # This is a simple linear scaling
+    if misappropriation_findings > 0:
+        audit_score = max(0, 100 - (total_amount_at_risk / 100 * 100))
+    else:
+        audit_score = 100
+
+    # 3. OAG opinion & audit status score (0-100)
+    opinion_scores = {
+        "Unqualified": 90,
+        "Unqualified*": 85,
+        "Qualified": 60,
+        "Adverse": 30,
+        "Disclaimer": 20
+    }
+    status_scores = {
+        "Clean": 90,
+        "Concerning": 40,
+        "Unknown": 50
+    }
+
+    oag_opinion = mp_data.get("oag_opinion", "") if mp_data else ""
+    audit_status = mp_data.get("audit_status", "") if mp_data else ""
+
+    opinion_score = opinion_scores.get(oag_opinion, 50)
+    status_score = status_scores.get(audit_status, 50)
+
+    oag_score = (opinion_score + status_score) / 2
+
+    # 4. Combine with weights
+    # 30% utilization, 40% audit, 30% OAG
+    score = (0.3 * utilization_score) + (0.4 * audit_score) + (0.3 * oag_score)
+    score = max(0, min(100, score))
+
+    return round(score, 2)
+
+
+@constituency_bp.route("/<slug>/score", methods=["GET"])
+def get_constituency_score(slug):
+    """Get accountability score for a specific constituency."""
+    try:
+        db = get_db()
+
+        # Verify constituency exists
+        constituency = db.constituencies.find_one({"slug": slug})
+        if not constituency:
+            return jsonify({"error": "Constituency not found"}), 404
+
+        # Get allocations
+        allocations = list(db.allocations.find({"constituency_slug": slug}))
+
+        # Get audit findings
+        audit_findings = list(db.audit_findings.find({"constituency_slug": slug}))
+
+        # Get MP data for OAG opinion and audit status
+        mp_data = db.mps.find_one({"constituency_slug": slug})
+
+        score = calculate_constituency_score(allocations, audit_findings, mp_data)
+
+        return jsonify({
+            "constituency": constituency["name"],
+            "slug": slug,
+            "score": score,
+            "generated_at": datetime.now().isoformat()
+        }), 200
+    except Exception as e:
+        return jsonify({"error": "Failed to calculate constituency score", "details": str(e)}), 500
 
 # Constituency endpoints
 @constituency_bp.route("/", methods=["GET"])

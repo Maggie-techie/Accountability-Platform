@@ -24,14 +24,14 @@ export default function Leaders() {
     const fetchData = async () => {
       try {
         setLoading(true)
-        // Fetch governor data and constituencies data in parallel
-        const [governorResponse, constituenciesResponse] = await Promise.all([
+        // Fetch governor data and constituencies with scores in parallel
+        const [governorResponse, constituenciesWithScores] = await Promise.all([
           APIService.getGovernorProfile(),
-          APIService.getAllConstituencies()
+          APIService.getAllConstituencyScores()
         ])
 
         setGovernorData(governorResponse)
-        setConstituenciesData(constituenciesResponse.constituencies || constituenciesResponse)
+        setConstituenciesData(constituenciesWithScores)
         setError(null)
       } catch (err) {
         setError(err.message || 'Failed to load leaders data')
