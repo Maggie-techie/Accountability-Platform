@@ -232,15 +232,19 @@ export default function LeaderProfile() {
 
   const findings = auditFindings
   const trend = !isGovernor ? getTotalAllocationTrend(constituency) : []
-  const revenueByYear = countyFinances
-  ? Object.values(
-      countyFinances.reduce((acc, r) => {
-        if (!acc[r.financial_year]) acc[r.financial_year] = { fy: r.financial_year }
-        acc[r.financial_year][r.revenue_source] = r.amount_kshb
-        return acc
-      }, {})
-    ).sort((a, b) => a.fy.localeCompare(b.fy))
-  : []
+
+  // Handle new pivoted format from /api/governor/finances (one doc per FY with equitable_share_kshb, conditional_grants_kshb, etc.)
+  const revenueByYear = (Array.isArray(countyFinances) && countyFinances.length)
+    ? countyFinances.map((fyData) => ({
+        fy: fyData.financial_year,
+        'Equitable Share': fyData.equitable_share_kshb || 0,
+        'Conditional Grants': fyData.conditional_grants_kshb || 0,
+        'Own Source Revenue': fyData.osr_kshb || 0,
+        Expenditure: fyData.expenditure_kshb || 0,
+        Development: fyData.development_kshb || 0,
+        Recurrent: fyData.recurrent_kshb || 0
+      })).sort((a, b) => a.fy.localeCompare(b.fy))
+    : []
   
   console.log('DEBUG:', { slug, isGovernor, constituencySlug: constituency?.slug, photoKey })
 
