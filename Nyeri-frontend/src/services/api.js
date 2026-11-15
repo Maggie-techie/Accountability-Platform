@@ -126,6 +126,28 @@ class APIService {
     }
     return response.blob();
   }
+
+  // Anomaly endpoints
+  static async getGovernorTopRisks() {
+    const response = await fetch(`${this.baseURL}/ai/governor/top_risks`);
+    return response.json();
+  }
+
+  static async getGovernorDepartmentFlags() {
+    const response = await fetch(`${this.baseURL}/ai/governor/department_flags`);
+    return response.json();
+  }
+
+  static async getGNNAnomalies(constituencySlug) {
+    const response = await fetch(`${this.baseURL}/ai/mp/${constituencySlug}/gnn_anomalies`);
+    return response.json();
+  }
+
+  // MP AI Anomalies
+  static async getMPAIAnomalies(constituencySlug) {
+    const response = await fetch(`${this.baseURL}/ai/mp/${constituencySlug}/anomalies`);
+    return response.json();
+  }
 }
 
 export default APIService;

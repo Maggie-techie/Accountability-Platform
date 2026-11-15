@@ -72,7 +72,8 @@ export default function AccountabilityDashboard() {
 
   const totalFlagged = countyAuditFindings.reduce((a, f) => {
     const amount = f.amount_flagged_kshm || f.amount_at_risk || 0
-    return a + (typeof amount === 'number' ? amount : 0)
+    const numAmount = typeof amount === 'number' ? amount : (typeof amount === 'string' ? parseFloat(amount) : 0)
+    return a + (isNaN(numAmount) ? 0 : numAmount)
   }, 0)
 
   const severityCounts = ['High', 'Medium', 'Low'].map((s) => ({
@@ -83,11 +84,18 @@ export default function AccountabilityDashboard() {
 
   // Build allocation trend data from county finances
   const allocationTrendData = countyFinances.map(f => ({
-    fy: f.financial_year,
+    fy: f.financial_year || 'N/A',
     'Equitable Share': f.equitable_share_kshb || 0,
     'Conditional Grants': f.conditional_grants_kshb || 0,
     'Own Source Revenue': f.osr_kshb || 0,
     'Expenditure': f.expenditure_kshb || 0
+  }))
+
+  // Normalize department data for chart - handle both absorption_rate and absorptionRate
+  const normalizedDepartments = departments.map(d => ({
+    ...d,
+    absorption_rate: d.absorption_rate ?? d.absorptionRate ?? 0,
+    department: d.department || d.name || 'Unknown'
   }))
 
   // Download governor PDF report
@@ -154,7 +162,7 @@ export default function AccountabilityDashboard() {
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
         <KpiCard label="Avg. constituency score" value={avgScore} sub="out of 100" />
-        <KpiCard label="Total flagged amount" value={`KSh ${totalFlagged.toFixed(1)}M`} changeTone="down" />
+        <KpiCard label="Total flagged amount" value={`KSh ${(isNaN(totalFlagged) ? 0 : totalFlagged).toFixed(1)}M`} changeTone="down" />
         <KpiCard label="Active anomalies" value={String(anomalies.filter((a) => a.status !== 'Reviewed - no issue').length)} />
         <KpiCard label="Departments below target" value={String(departmentsBelowTarget)} />
       </div>
@@ -206,16 +214,23 @@ export default function AccountabilityDashboard() {
           columns={['Constituency', 'MP', 'Score', 'Allocation FY24/25', 'Audit Opinion', 'Findings']}
           rows={constituencies}
           keyField="_id"
-          renderRow={(c) => (
-            <>
-              <td className="py-3 pr-4 font-medium text-ink">{c.name}</td>
-              <td className="py-3 pr-4 text-ink-muted">{c.mp}</td>
-              <td className="py-3 pr-4"><Badge tone={c.accountabilityScore >= 70 ? 'good' : c.accountabilityScore >= 55 ? 'watch' : 'risk'}>{c.accountabilityScore}</Badge></td>
-              <td className="py-3 pr-4 text-ink-muted">KSh {c.totalAllocationKshm.toFixed(1)}M</td>
-              <td className="py-3 pr-4 text-ink-muted">{c.auditStatus}</td>
-              <td className="py-3 pr-4 text-ink-muted">{c.misappropriationCount} flagged</td>
-            </>
-          )}
+          renderRow={(c) => {
+            const allocation = (c.totalAllocationKshm ?? c.totalAllocation ?? 0)
+            const misCount = c.misappropriationCount ?? c.misappropriation_count ?? 0
+            const auditStatus = c.auditStatus ?? c.audit_status ?? 'N/A'
+            const score = c.accountabilityScore ?? 0
+            const scoreTone = score >= 70 ? 'good' : score >= 55 ? 'watch' : 'risk'
+            return (
+              <>
+                <td className="py-3 pr-4 font-medium text-ink">{c.name || 'Unknown'}</td>
+                <td className="py-3 pr-4 text-ink-muted">{c.mp?.name || c.mp || 'N/A'}</td>
+                <td className="py-3 pr-4"><Badge tone={scoreTone}>{score}</Badge></td>
+                <td className="py-3 pr-4 text-ink-muted">KSh {allocation.toFixed(1)}M</td>
+                <td className="py-3 pr-4 text-ink-muted">{auditStatus}</td>
+                <td className="py-3 pr-4 text-ink-muted">{misCount} flagged</td>
+              </>
+            )
+          }}
         />
       </Card>
 
@@ -223,7 +238,7 @@ export default function AccountabilityDashboard() {
         <h3 className="font-serif font-semibold text-lg mb-4">Departmental absorption</h3>
         <div className="h-64">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={departments}>
+            <BarChart data={normalizedDepartments}>
               <CartesianGrid stroke="#E2E5E1" vertical={false} />
               <XAxis dataKey="department" tick={{ fontSize: 11, fill: '#5B6560' }} axisLine={{ stroke: '#E2E5E1' }} tickLine={false} interval={0} angle={-15} textAnchor="end" height={60} />
               <YAxis tick={{ fontSize: 12, fill: '#5B6560' }} axisLine={false} tickLine={false} unit="%" />
