@@ -223,6 +223,21 @@ export default function Anomalies() {
     (!sourceType || a.sourceType === sourceType)
   ), [anomalies, severity, fy, category, status, sourceType])
 
+  // All hooks must run unconditionally, before any early returns
+  const counts = useMemo(() => ({
+    High: filtered.filter((a) => a.severity === 'High').length,
+    Medium: filtered.filter((a) => a.severity === 'Medium').length,
+    Low: filtered.filter((a) => a.severity === 'Low').length
+  }), [filtered])
+
+  const sourceCounts = useMemo(() => {
+    const counts = {}
+    filtered.forEach(a => {
+      counts[a.sourceType] = (counts[a.sourceType] || 0) + 1
+    })
+    return counts
+  }, [filtered])
+
   // Handle loading and error states
   if (loading) {
     return (
@@ -248,20 +263,6 @@ export default function Anomalies() {
       </div>
     )
   }
-
-  const counts = {
-    High: filtered.filter((a) => a.severity === 'High').length,
-    Medium: filtered.filter((a) => a.severity === 'Medium').length,
-    Low: filtered.filter((a) => a.severity === 'Low').length
-  }
-
-  const sourceCounts = useMemo(() => {
-    const counts = {}
-    filtered.forEach(a => {
-      counts[a.sourceType] = (counts[a.sourceType] || 0) + 1
-    })
-    return counts
-  }, [filtered])
 
   return (
     <div className="max-w-content mx-auto px-4 sm:px-6 py-8">

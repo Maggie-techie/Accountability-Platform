@@ -223,7 +223,7 @@ export default function AccountabilityDashboard() {
             return (
               <>
                 <td className="py-3 pr-4 font-medium text-ink">{c.name || 'Unknown'}</td>
-                <td className="py-3 pr-4 text-ink-muted">{c.mp || 'N/A'}</td>
+                <td className="py-3 pr-4 text-ink-muted">{c.mp?.name || c.mp || 'N/A'}</td>
                 <td className="py-3 pr-4"><Badge tone={scoreTone}>{score}</Badge></td>
                 <td className="py-3 pr-4 text-ink-muted">KSh {allocation.toFixed(1)}M</td>
                 <td className="py-3 pr-4 text-ink-muted">{auditStatus}</td>
