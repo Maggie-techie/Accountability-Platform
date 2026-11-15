@@ -1,4 +1,4 @@
-import { AlertTriangle, CheckCircle2, Info, XCircle, Loader2, Inbox } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Info, XCircle, Loader2, Inbox, X } from 'lucide-react'
 
 export function Button({ variant = 'primary', size = 'md', className = '', children, ...props }) {
   const base = 'inline-flex items-center justify-center gap-2 rounded font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none'
@@ -95,6 +95,36 @@ export function ErrorState({ title = 'Something went wrong', description = 'We c
           Try again
         </Button>
       )}
+    </div>
+  )
+}
+
+export function Toast({ type = 'info', message, onClose, duration = 5000 }) {
+  const icons = {
+    info: <Info size={18} className="text-forest-600" />,
+    warning: <AlertTriangle size={18} className="text-gold-500" />,
+    success: <CheckCircle2 size={18} className="text-forest-600" />,
+    error: <XCircle size={18} className="text-clay-500" />,
+  }
+  const backgrounds = {
+    info: 'bg-forest-50 border-forest-200',
+    warning: 'bg-gold-50 border-gold-200',
+    success: 'bg-forest-50 border-forest-200',
+    error: 'bg-clay-50 border-clay-200',
+  }
+  const Icon = icons[type] || icons.info
+
+  if (typeof window !== 'undefined' && duration > 0) {
+    setTimeout(() => onClose && onClose(), duration)
+  }
+
+  return (
+    <div className={`fixed bottom-6 right-6 z-50 flex items-center gap-3 px-4 py-3 rounded-md border shadow-lg animate-slide-in ${backgrounds[type]}`}>
+      {Icon}
+      <span className="text-sm font-medium text-ink">{message}</span>
+      <button onClick={onClose} className="ml-2 text-ink-muted hover:text-ink">
+        <X size={16} />
+      </button>
     </div>
   )
 }

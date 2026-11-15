@@ -1,8 +1,8 @@
 import { useParams, Link } from 'react-router-dom'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { LineChart, Line, XAxis, YAxis, Tooltip as RTooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { FileDown } from 'lucide-react'
-import { Card, Badge, Button } from '../components/ui'
+import { Card, Badge, Button, Toast } from '../components/ui'
 import { Breadcrumbs } from '../components/DataDisplay'
 import { AIDisclaimer } from '../components/Insights'
 import APIService from '../services/api'
@@ -18,6 +18,7 @@ export default function ConstituencyProfile() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [accountabilityScore, setAccountabilityScore] = useState(null)
+  const [toast, setToast] = useState(null)
 
   useEffect(() => {
     const fetchData = async () => {
@@ -64,9 +65,16 @@ export default function ConstituencyProfile() {
         // Fetch anomalies from AI endpoint
         try {
           const res = await fetch(`${APIService.baseURL}/ai/mp/${slug}/anomalies`)
-          anomaliesResponse = await res.json()
+          if (res.ok) {
+            anomaliesResponse = await res.json()
+          } else {
+            const errorData = await res.json().catch(() => ({}))
+            console.warn('Anomalies endpoint returned error:', res.status, errorData)
+            anomaliesResponse = { success: false, error: errorData.error || 'Failed to fetch anomalies' }
+          }
         } catch (err) {
           console.warn('Could not fetch anomalies from AI endpoint:', err)
+          anomaliesResponse = { success: false, error: err.message }
           // Fallback to empty anomalies
         }
 
@@ -162,6 +170,32 @@ export default function ConstituencyProfile() {
     fetchData()
   }, [slug])
 
+  // Download PDF report
+  const handleDownloadReport = useCallback(async () => {
+    if (!slug || !constituency) return
+
+    try {
+      setToast({ type: 'info', message: 'Generating report...' })
+      const blob = await APIService.downloadConstituencyPDFReport(slug)
+
+      // Create download link
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      const mpName = constituency.mp?.name || constituency.name || 'constituency'
+      a.download = `${mpName.replace(/\s+/g, '_')}_accountability_report.pdf`
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(a)
+
+      setToast({ type: 'success', message: 'Report downloaded successfully!' })
+    } catch (err) {
+      console.error('Error downloading report:', err)
+      setToast({ type: 'error', message: err.message || 'Failed to generate report' })
+    }
+  }, [slug, constituency])
+
   // Handle loading and error states
   if (loading) {
     return (
@@ -223,7 +257,7 @@ export default function ConstituencyProfile() {
             <p className="text-2xl font-serif font-semibold text-forest-700">{accountabilityScore ?? 0}</p>
             <p className="text-xs text-ink-muted">Accountability score</p>
           </div>
-          <Button variant="secondary"><FileDown size={16} /> Download report</Button>
+          <Button variant="secondary" onClick={handleDownloadReport}><FileDown size={16} /> Download report</Button>
         </div>
       </Card>
 
@@ -300,6 +334,15 @@ export default function ConstituencyProfile() {
           <AIDisclaimer compact />
         </div>
       </div>
+
+      {toast && (
+        <Toast
+          type={toast.type}
+          message={toast.message}
+          onClose={() => setToast(null)}
+          duration={5000}
+        />
+      )}
     </div>
   )
 }

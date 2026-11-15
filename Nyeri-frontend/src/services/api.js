@@ -107,6 +107,25 @@ class APIService {
     });
     return response.json();
   }
+
+  // PDF Report endpoints
+  static async downloadGovernorPDFReport(governorName) {
+    const response = await fetch(`${this.baseURL}/reports/governor/${encodeURIComponent(governorName)}/pdf`);
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to generate report' }));
+      throw new Error(error.error || error.details || 'Failed to generate governor report');
+    }
+    return response.blob();
+  }
+
+  static async downloadConstituencyPDFReport(constituencySlug) {
+    const response = await fetch(`${this.baseURL}/reports/constituency/${constituencySlug}/pdf`);
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to generate report' }));
+      throw new Error(error.error || error.details || 'Failed to generate constituency report');
+    }
+    return response.blob();
+  }
 }
 
 export default APIService;
