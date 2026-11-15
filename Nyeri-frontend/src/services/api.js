@@ -39,6 +39,28 @@ class APIService {
     return response.json();
   }
 
+  static async getConstituencyScore(slug) {
+    const response = await fetch(`${this.baseURL}/constituency/${slug}/score`);
+    return response.json();
+  }
+
+  static async getAllConstituencyScores() {
+    // Fetch all constituencies and their scores in parallel
+    const constituenciesResponse = await this.getAllConstituencies({ limit: 50 });
+    const constituencies = constituenciesResponse.constituencies || constituenciesResponse;
+
+    const scores = await Promise.all(
+      constituencies.map(c =>
+        this.getConstituencyScore(c.slug).catch(() => ({ score: null }))
+      )
+    );
+
+    return constituencies.map((c, i) => ({
+      ...c,
+      accountabilityScore: scores[i]?.score ?? c.accountabilityScore ?? null
+    }));
+  }
+
   // Governor endpoints
   static async getGovernorProfile() {
     const response = await fetch(`${this.baseURL}/governor`);
