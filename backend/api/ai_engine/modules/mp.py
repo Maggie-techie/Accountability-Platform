@@ -193,3 +193,26 @@ def mp_cached_at(constituency_slug):
         import logging
         logging.getLogger(__name__).error(f"Error in MP cached at: {e}")
         return jsonify({"error": "Internal server error"}), 500
+
+
+@mp_bp.route("/<constituency_slug>/gnn_anomalies", methods=["GET"])
+def mp_gnn_anomalies(constituency_slug):
+    """Get raw GNN-detected anomalies for a constituency."""
+    try:
+        if not data_access.validate_constituency_exists(constituency_slug):
+            return jsonify({"error": f"Constituency not found: {constituency_slug}"}), 404
+
+        gnn_anomalies = data_access.get_gnn_anomalies(constituency_slug)
+        for a in gnn_anomalies:
+            a["_id"] = str(a["_id"])
+
+        return jsonify({
+            "success": True,
+            "module": "gnn_anomalies",
+            "data": gnn_anomalies
+        })
+
+    except Exception as e:
+        import logging
+        logging.getLogger(__name__).error(f"Error in MP GNN anomalies: {e}")
+        return jsonify({"error": "Internal server error"}), 500
