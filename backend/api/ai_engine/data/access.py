@@ -20,7 +20,7 @@ class DataAccess:
         "mps": "mps",
         "county_leaders": "county_leaders",
         "county_finances": "county_finances",
-        "county_audit": "county_audit",
+        "county_audit_findings": "county_audit_findings",
         "department_absorption": "department_absorption",
         "gnn_anomalies": "gnn_anomalies",
         "projects": "projects",
@@ -83,12 +83,64 @@ class DataAccess:
         return self.collection("county_leaders").find_one({})
 
     def get_county_finances(self) -> list:
-        """Get county financial data by year."""
+        """Get county financial data by year (raw format - rows with revenue_source)."""
         return list(self.collection("county_finances").find({}).sort("financial_year", 1))
+
+    def get_county_finances_pivoted(self) -> list:
+        """Get county financial data pivoted by financial_year (one doc per FY with equitable_share_kshb, etc.)."""
+        raw_data = self.get_county_finances()
+
+        # Pivot data by financial_year to match frontend/API expectations
+        pivoted = {}
+        for row in raw_data:
+            fy = row.get("financial_year", "Unknown")
+            if fy not in pivoted:
+                pivoted[fy] = {
+                    "financial_year": fy,
+                    "equitable_share_kshb": 0,
+                    "conditional_grants_kshb": 0,
+                    "osr_kshb": 0,
+                    "expenditure_kshb": 0,
+                    "development_kshb": 0,
+                    "recurrent_kshb": 0,
+                    "osr_target_kshb": 0,
+                    "county": row.get("county", "Nyeri"),
+                    "county_code": row.get("county_code", "019"),
+                    "governor": row.get("governor", "")
+                }
+
+            source = row.get("revenue_source", "").lower()
+            amount = row.get("amount_kshb", 0)
+
+            # Map revenue_source to expected fields
+            if "equitable" in source:
+                pivoted[fy]["equitable_share_kshb"] = amount
+            elif "conditional" in source:
+                pivoted[fy]["conditional_grants_kshb"] = amount
+            elif "own source" in source or "osr" in source:
+                pivoted[fy]["osr_kshb"] = amount
+            elif "expenditure" in source or "total" in source:
+                pivoted[fy]["expenditure_kshb"] = amount
+            elif "development" in source:
+                pivoted[fy]["development_kshb"] = amount
+            elif "recurrent" in source:
+                pivoted[fy]["recurrent_kshb"] = amount
+
+        # Also copy other fields from raw data if present
+        for row in raw_data:
+            fy = row.get("financial_year", "Unknown")
+            if fy in pivoted:
+                for key in ["development_kshb", "recurrent_kshb", "osr_target_kshb"]:
+                    if key in row and row[key]:
+                        pivoted[fy][key] = row[key]
+
+        result = list(pivoted.values())
+        result.sort(key=lambda x: x.get("financial_year", ""))
+        return result
 
     def get_county_audit_findings(self) -> list:
         """Get county audit findings."""
-        return list(self.collection("county_audit").find({}))
+        return list(self.collection("county_audit_findings").find({}))
 
     def get_department_absorption(self) -> list:
         """Get department absorption data."""

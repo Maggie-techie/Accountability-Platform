@@ -65,12 +65,32 @@ export default function Home() {
     )
   }
   
-  const latestFy = countyFinances?.length
+  // Handle both old format (rows with revenue_source) and new pivoted format
+  const latestFy = (Array.isArray(countyFinances) && countyFinances.length)
     ? [...new Set(countyFinances.map((f) => f.financial_year))].sort().slice(-1)[0]
     : null
 
-  const revenueSources = countyFinances
-    ? countyFinances.filter((f) => f.financial_year === latestFy)
+  // Get revenue sources for the latest FY - works with both formats
+  const revenueSources = (Array.isArray(countyFinances) && latestFy)
+    ? (() => {
+        const fyData = countyFinances.find((f) => f.financial_year === latestFy)
+        if (!fyData) return []
+
+        // New pivoted format: check for individual revenue fields
+        const sources = []
+        if (fyData.equitable_share_kshb) sources.push({ revenue_source: 'Equitable Share', amount_kshb: fyData.equitable_share_kshb, _id: 'equitable' })
+        if (fyData.conditional_grants_kshb) sources.push({ revenue_source: 'Conditional Grants', amount_kshb: fyData.conditional_grants_kshb, _id: 'conditional' })
+        if (fyData.osr_kshb) sources.push({ revenue_source: 'Own Source Revenue', amount_kshb: fyData.osr_kshb, _id: 'osr' })
+        if (fyData.expenditure_kshb) sources.push({ revenue_source: 'Expenditure', amount_kshb: fyData.expenditure_kshb, _id: 'expenditure' })
+        if (fyData.development_kshb) sources.push({ revenue_source: 'Development', amount_kshb: fyData.development_kshb, _id: 'development' })
+        if (fyData.recurrent_kshb) sources.push({ revenue_source: 'Recurrent', amount_kshb: fyData.recurrent_kshb, _id: 'recurrent' })
+
+        // Fallback to old format (rows with revenue_source)
+        if (sources.length === 0 && fyData.revenue_source) {
+          return countyFinances.filter((f) => f.financial_year === latestFy)
+        }
+        return sources
+      })()
     : []
 
   return (

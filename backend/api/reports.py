@@ -295,13 +295,14 @@ def build_governor_report_story(db, governor_name, styles):
     """Build the PDF story (content) for a governor report."""
     story = []
 
-    # Get data
-    profile = db.county_leaders.find_one({"governor": governor_name})
+    # Get data - use 'name' field for county_leaders
+    profile = db.county_leaders.find_one({"name": governor_name})
     if not profile:
         return None
 
-    finances = list(db.county_finances.find({"governor": governor_name}))
-    audit = list(db.county_audit_findings.find({"governor": governor_name}))
+    # County finances and audit are county-level, not governor-specific
+    finances = list(db.county_finances.find({}))
+    audit = list(db.county_audit_findings.find({}))
     departments = list(db.department_absorption.find({}))
 
     # Calculate score
@@ -745,8 +746,8 @@ def generate_governor_pdf_report(governor_name):
     try:
         db = get_db()
 
-        # Verify governor exists
-        profile = db.county_leaders.find_one({"governor": governor_name})
+        # Verify governor exists - use 'name' field instead of 'governor'
+        profile = db.county_leaders.find_one({"name": governor_name})
         if not profile:
             return jsonify({"error": f"Governor {governor_name} not found"}), 404
 
@@ -849,22 +850,22 @@ def generate_governor_report(governor_name):
         db = get_db()
         format = request.args.get('format', 'csv').lower()
 
-        # Get governor profile
-        profile = db.county_leaders.find_one({"governor": governor_name})
+        # Get governor profile - use 'name' field
+        profile = db.county_leaders.find_one({"name": governor_name})
         if not profile:
             return jsonify({"error": f"Governor {governor_name} not found"}), 404
 
         profile = serializable_single(profile)
 
-        # Get financial data
-        finances = list(db.county_finances.find({"governor": governor_name}))
+        # County finances and audit are county-level, not governor-specific
+        finances = list(db.county_finances.find({}))
         finances = serializable_doc(finances)
 
         # Get audit findings
-        audit = list(db.county_audit_findings.find({"governor": governor_name}))
+        audit = list(db.county_audit_findings.find({}))
         audit = serializable_doc(audit)
 
-        # Get department data (assuming it's not governor-specific, but we can filter if needed)
+        # Get department data
         department = list(db.department_absorption.find({}))
         department = serializable_doc(department)
 

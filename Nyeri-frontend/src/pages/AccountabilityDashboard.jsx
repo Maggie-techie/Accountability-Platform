@@ -32,14 +32,14 @@ export default function AccountabilityDashboard() {
           financesResponse,
           departmentsResponse,
           auditResponse,
-          anomaliesResponse
+          findingsClassifierResponse
         ] = await Promise.all([
           APIService.getAllConstituencyScores(),
           APIService.getGovernorProfile(),
           APIService.getCountyFinances(),
           APIService.getDepartmentData(),
           APIService.getCountyAuditFindings(),
-          fetch(`${APIService.baseURL}/ai/county/narrative`).then(r => r.json()).catch(() => ({ success: false }))
+          APIService.getCountyFindingsClassifier().catch(() => ({ success: false }))
         ])
 
         setConstituencies(constituenciesData)
@@ -48,9 +48,9 @@ export default function AccountabilityDashboard() {
         setDepartments(departmentsResponse)
         setCountyAuditFindings(auditResponse.audit_findings || auditResponse || [])
 
-        // Parse anomalies from AI response
-        if (anomaliesResponse && anomaliesResponse.success && anomaliesResponse.data) {
-          const narrative = anomaliesResponse.data.narrative_fields || {}
+        // Parse anomalies from findings classifier response (has severity, category, entity, etc.)
+        if (findingsClassifierResponse && findingsClassifierResponse.success && findingsClassifierResponse.data) {
+          const narrative = findingsClassifierResponse.data.narrative_fields || {}
           if (narrative.findings && Array.isArray(narrative.findings)) {
             setAnomalies(narrative.findings)
           }
@@ -82,7 +82,7 @@ export default function AccountabilityDashboard() {
 
   const departmentsBelowTarget = departments.filter((d) => d.status !== 'On Track').length
 
-  // Build allocation trend data from county finances
+  // Build allocation trend data from county finances (now pivoted by the API)
   const allocationTrendData = countyFinances.map(f => ({
     fy: f.financial_year || 'N/A',
     'Equitable Share': f.equitable_share_kshb || 0,
@@ -236,14 +236,14 @@ export default function AccountabilityDashboard() {
 
       <Card className="p-6">
         <h3 className="font-serif font-semibold text-lg mb-4">Departmental absorption</h3>
-        <div className="h-64">
+        <div className="h-80">
           <ResponsiveContainer width="100%" height="100%">
-            <BarChart data={normalizedDepartments}>
-              <CartesianGrid stroke="#E2E5E1" vertical={false} />
-              <XAxis dataKey="department" tick={{ fontSize: 11, fill: '#5B6560' }} axisLine={{ stroke: '#E2E5E1' }} tickLine={false} interval={0} angle={-15} textAnchor="end" height={60} />
-              <YAxis tick={{ fontSize: 12, fill: '#5B6560' }} axisLine={false} tickLine={false} unit="%" />
+            <BarChart data={normalizedDepartments} layout="vertical">
+              <CartesianGrid stroke="#E2E5E1" horizontal={false} />
+              <YAxis type="category" dataKey="department" tick={{ fontSize: 11, fill: '#5B6560' }} axisLine={{ stroke: '#E2E5E1' }} tickLine={false} width={160} />
+              <XAxis tick={{ fontSize: 12, fill: '#5B6560' }} axisLine={false} tickLine={false} unit="%" />
               <RTooltip contentStyle={{ fontSize: 13, borderRadius: 6, borderColor: '#E2E5E1' }} />
-              <Bar dataKey="absorption_rate" name="Absorption %" fill="#14532D" radius={[3, 3, 0, 0]} />
+              <Bar dataKey="absorption_rate" name="Absorption %" fill="#14532D" radius={[0, 3, 3, 0]} />
             </BarChart>
           </ResponsiveContainer>
         </div>

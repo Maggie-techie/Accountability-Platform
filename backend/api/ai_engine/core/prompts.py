@@ -14,7 +14,7 @@ def generate_governor_summary(module: str) -> str:
         data = data_access.get_governor_summary_data()
 
         profile = data.get("profile")
-        finances = data.get("finances", [])
+        finances = data_access.get_county_finances_pivoted()  # Use pivoted format
         audit_findings = data.get("audit_findings", [])
         departments = data.get("departments", [])
 
@@ -46,8 +46,8 @@ DEPARTMENT COUNT: {len(departments)} departments
                 dept_summary.append(
                     f"{d.get('department', 'Unknown')}: "
                     f"{d.get('absorption_rate', 0):.1f}% absorption, "
-                    f"KSh {d.get('budget_allocated_kshm', 0):,.0f}M allocated, "
-                    f"KSh {d.get('expenditure_kshm', 0):,.0f}M spent"
+                    f"KSh {d.get('approved_budget_kshm', d.get('budget_allocated_kshm', 0)):,.0f}M allocated, "
+                    f"KSh {d.get('q3_spend_kshm', d.get('expenditure_kshm', 0)):,.0f}M spent"
                 )
 
             return f"""
@@ -313,7 +313,7 @@ def generate_comparison_data(leader1_type: str, leader1_id: str, leader2_type: s
             radar["mp_track"]["correct_appropriations"] = 0
 
         # Governor track data
-        finances = data_access.get_county_finances()
+        finances = data_access.get_county_finances_pivoted()  # Use pivoted format
         gov_audits = data_access.get_county_audit_findings()
         departments = data_access.get_department_absorption()
 

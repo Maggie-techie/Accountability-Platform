@@ -37,7 +37,7 @@ function transformMPAIAnomalies(constituency, aiData) {
 function transformGovernorRisks(aiData) {
   const risks = aiData?.narrative_fields?.risks || []
   return risks.map((risk, i) => ({
-    id: `gov-risk-${risk.title?.replace(/\s+/g, '-').toLowerCase() || i}`,
+    id: `gov-risk-${risk.title?.replace(/\s+/g, '-').toLowerCase() || 'unknown'}-${i}`,
     title: risk.title || 'Government Risk',
     entity: 'County Government',
     category: risk.category || 'Governance',
@@ -54,7 +54,7 @@ function transformGovernorRisks(aiData) {
 function transformDepartmentFlags(aiData) {
   const flags = aiData?.narrative_fields?.flags || []
   return flags.map((flag, i) => ({
-    id: `gov-flag-${flag.department?.replace(/\s+/g, '-').toLowerCase() || i}`,
+    id: `gov-flag-${flag.department?.replace(/\s+/g, '-').toLowerCase() || 'unknown'}-${i}`,
     title: `${flag.department || 'Department'} - ${flag.flag_type || 'Flag'}`,
     entity: 'County Government',
     category: flag.flag_type || 'Department',
@@ -90,7 +90,7 @@ function transformAuditFindings(findings, entityName, entityType) {
 function transformGNNAnomalies(constituency, gnnData) {
   const anomalies = gnnData?.data || []
   return anomalies.map((a, i) => ({
-    id: `gnn-${constituency.slug}-${a.metadata?.fiscal_year || i}`,
+    id: `gnn-${constituency.slug}-${a.metadata?.fiscal_year || 'unknown'}-${i}`,
     title: a.explanation || 'GNN Detected Anomaly',
     entity: constituency.name,
     category: 'ML Detection',
