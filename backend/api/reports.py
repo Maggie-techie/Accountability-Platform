@@ -3,8 +3,33 @@ from api.database.connection import get_db
 import pandas as pd
 import io
 from datetime import datetime
+from reportlab.lib.pagesizes import A4
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.lib.units import inch, cm
+from reportlab.lib.colors import HexColor, black, white
+from reportlab.lib.enums import TA_LEFT, TA_CENTER, TA_JUSTIFY, TA_RIGHT
+from reportlab.platypus import (
+    SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle,
+    PageBreak, KeepTogether, HRFlowable, ListFlowable, ListItem
+)
+from reportlab.lib import colors
 
 reports_bp = Blueprint("reports", __name__)
+
+# Color palette for reports
+REPORT_COLORS = {
+    'primary': HexColor('#14532D'),      # Dark green
+    'secondary': HexColor('#2E6B44'),    # Medium green
+    'accent': HexColor('#A6431F'),       # Rust/brown
+    'light_bg': HexColor('#F0F5F0'),     # Light green background
+    'dark_text': HexColor('#1A2E1A'),    # Dark text
+    'muted_text': HexColor('#5B6560'),   # Muted text
+    'risk_high': HexColor('#A6431F'),    # High risk
+    'risk_medium': HexColor('#C08A28'),  # Medium risk
+    'risk_low': HexColor('#2E6B44'),     # Low risk
+    'table_header': HexColor('#14532D'), # Table header
+    'table_row_alt': HexColor('#F8FAF8'), # Alternate row
+}
 
 def serializable_doc(data):
     """Convert ObjectId to string for JSON serialization in a list of documents"""
@@ -18,6 +43,800 @@ def serializable_single(doc):
     if doc and "_id" in doc:
         doc["_id"] = str(doc["_id"])
     return doc
+
+
+# ============================================================
+# PDF Report Generation Helpers
+# ============================================================
+
+def get_report_styles():
+    """Get custom styles for PDF reports."""
+    styles = getSampleStyleSheet()
+
+    # Title style
+    styles.add(ParagraphStyle(
+        name='ReportTitle',
+        parent=styles['Title'],
+        fontName='Helvetica-Bold',
+        fontSize=24,
+        textColor=REPORT_COLORS['primary'],
+        spaceAfter=6,
+        alignment=TA_CENTER,
+    ))
+
+    # Subtitle style
+    styles.add(ParagraphStyle(
+        name='ReportSubtitle',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=12,
+        textColor=REPORT_COLORS['muted_text'],
+        spaceAfter=4,
+        alignment=TA_CENTER,
+    ))
+
+    # Section heading
+    styles.add(ParagraphStyle(
+        name='SectionHeading',
+        parent=styles['Heading2'],
+        fontName='Helvetica-Bold',
+        fontSize=14,
+        textColor=REPORT_COLORS['primary'],
+        spaceBefore=16,
+        spaceAfter=8,
+        borderWidth=0,
+        borderPadding=0,
+    ))
+
+    # Subsection heading
+    styles.add(ParagraphStyle(
+        name='SubsectionHeading',
+        parent=styles['Heading3'],
+        fontName='Helvetica-Bold',
+        fontSize=11,
+        textColor=REPORT_COLORS['secondary'],
+        spaceBefore=10,
+        spaceAfter=4,
+    ))
+
+    # Body text
+    styles.add(ParagraphStyle(
+        name='ReportBody',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=10,
+        textColor=REPORT_COLORS['dark_text'],
+        spaceAfter=6,
+        alignment=TA_JUSTIFY,
+        leading=14,
+    ))
+
+    # Bullet text
+    styles.add(ParagraphStyle(
+        name='ReportBullet',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=10,
+        textColor=REPORT_COLORS['dark_text'],
+        spaceAfter=3,
+        leftIndent=20,
+        bulletIndent=8,
+        leading=14,
+    ))
+
+    # Footer style
+    styles.add(ParagraphStyle(
+        name='Footer',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=8,
+        textColor=REPORT_COLORS['muted_text'],
+        alignment=TA_CENTER,
+    ))
+
+    # Table cell style
+    styles.add(ParagraphStyle(
+        name='TableCell',
+        parent=styles['Normal'],
+        fontName='Helvetica',
+        fontSize=8,
+        textColor=REPORT_COLORS['dark_text'],
+        leading=10,
+    ))
+
+    # Table header style
+    styles.add(ParagraphStyle(
+        name='TableHeader',
+        parent=styles['Normal'],
+        fontName='Helvetica-Bold',
+        fontSize=8,
+        textColor=white,
+        leading=10,
+        alignment=TA_CENTER,
+    ))
+
+    return styles
+
+
+def add_page_number(canvas, doc):
+    """Add page numbers to PDF pages."""
+    page_num = canvas.getPageNumber()
+    text = f"Page {page_num}"
+    canvas.saveState()
+    canvas.setFont('Helvetica', 8)
+    canvas.setFillColor(REPORT_COLORS['muted_text'])
+    canvas.drawCentredString(A4[0] / 2, 0.5 * inch, text)
+    canvas.restoreState()
+
+
+def add_header_footer(canvas, doc, title, entity_name):
+    """Add header and footer to each page."""
+    canvas.saveState()
+
+    # Header line
+    canvas.setStrokeColor(REPORT_COLORS['primary'])
+    canvas.setLineWidth(1.5)
+    canvas.line(0.75 * inch, A4[1] - 0.6 * inch, A4[0] - 0.75 * inch, A4[1] - 0.6 * inch)
+
+    # Header text
+    canvas.setFont('Helvetica', 8)
+    canvas.setFillColor(REPORT_COLORS['muted_text'])
+    canvas.drawString(0.75 * inch, A4[1] - 0.5 * inch, f"{title} — {entity_name}")
+    canvas.drawRightString(A4[0] - 0.75 * inch, A4[1] - 0.5 * inch, datetime.now().strftime("%B %d, %Y"))
+
+    # Footer
+    canvas.setStrokeColor(REPORT_COLORS['muted_text'])
+    canvas.setLineWidth(0.5)
+    canvas.line(0.75 * inch, 0.7 * inch, A4[0] - 0.75 * inch, 0.7 * inch)
+    canvas.setFont('Helvetica', 7)
+    canvas.setFillColor(REPORT_COLORS['muted_text'])
+    canvas.drawString(0.75 * inch, 0.5 * inch, "Accountability Platform — www.accountability-platform.org")
+    canvas.drawCentredString(A4[0] / 2, 0.5 * inch, f"Page {canvas.getPageNumber()}")
+    canvas.drawRightString(A4[0] - 0.75 * inch, 0.5 * inch, "CONFIDENTIAL")
+
+    canvas.restoreState()
+
+
+def create_score_badge(score, styles):
+    """Create a score badge for the report."""
+    if score >= 75:
+        color = REPORT_COLORS['risk_low']
+        label = "Strong"
+    elif score >= 55:
+        color = REPORT_COLORS['risk_medium']
+        label = "Moderate"
+    else:
+        color = REPORT_COLORS['risk_high']
+        label = "Needs Attention"
+
+    # Create a table for the score badge
+    data = [[f"{score}/100", label]]
+    table = Table(data, colWidths=[1.2*inch, 1.5*inch])
+    table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, -1), color),
+        ('TEXTCOLOR', (0, 0), (-1, -1), white),
+        ('FONTNAME', (0, 0), (0, 0), 'Helvetica-Bold'),
+        ('FONTNAME', (1, 0), (1, 0), 'Helvetica'),
+        ('FONTSIZE', (0, 0), (0, 0), 24),
+        ('FONTSIZE', (1, 0), (1, 0), 12),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ('ROUNDEDCORNERS', [4, 4, 4, 4]),
+    ]))
+    return table
+
+
+def create_finding_table(findings, styles):
+    """Create a formatted table for audit findings."""
+    if not findings:
+        return Paragraph("No audit findings recorded.", styles['ReportBody'])
+
+    # Headers
+    headers = ['ID', 'Type', 'Category', 'Amount at Risk', 'Severity', 'Year']
+    data = [headers]
+
+    for f in findings:
+        finding_type = f.get('finding_type', '').replace('_', ' ').title()
+        category = f.get('category', f.get('finding_type', ''))
+        amount = f.get('amount_flagged_kshm', f.get('amount_at_risk', 'N/A'))
+        if isinstance(amount, (int, float)):
+            amount = f"KSh {amount:,.1f}M"
+        severity = f.get('severity', f.get('finding_type', ''))
+        year = f.get('financial_year', f.get('fy_reviewed', 'N/A'))
+
+        data.append([
+            f.get('id', f.get('_id', 'N/A')),
+            finding_type,
+            category,
+            str(amount),
+            severity,
+            str(year),
+        ])
+
+    # Create table
+    col_widths = [0.7*inch, 0.9*inch, 1.5*inch, 1*inch, 0.8*inch, 0.7*inch]
+    table = Table(data, colWidths=col_widths, repeatRows=1)
+
+    # Style the table
+    style_commands = [
+        ('BACKGROUND', (0, 0), (-1, 0), REPORT_COLORS['table_header']),
+        ('TEXTCOLOR', (0, 0), (-1, 0), white),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 8),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('GRID', (0, 0), (-1, -1), 0.5, REPORT_COLORS['muted_text']),
+        ('TOPPADDING', (0, 0), (-1, -1), 4),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+    ]
+
+    # Alternate row colors
+    for i in range(1, len(data)):
+        if i % 2 == 0:
+            style_commands.append(('BACKGROUND', (0, i), (-1, i), REPORT_COLORS['table_row_alt']))
+
+    # Color severity column
+    for i in range(1, len(data)):
+        severity = data[i][4].lower()
+        if 'high' in severity or 'adverse' in severity:
+            style_commands.append(('TEXTCOLOR', (4, i), (4, i), REPORT_COLORS['risk_high']))
+        elif 'medium' in severity or 'qualified' in severity:
+            style_commands.append(('TEXTCOLOR', (4, i), (4, i), REPORT_COLORS['risk_medium']))
+        elif 'low' in severity or 'unqualified' in severity:
+            style_commands.append(('TEXTCOLOR', (4, i), (4, i), REPORT_COLORS['risk_low']))
+
+    table.setStyle(TableStyle(style_commands))
+    return table
+
+
+def build_governor_report_story(db, governor_name, styles):
+    """Build the PDF story (content) for a governor report."""
+    story = []
+
+    # Get data
+    profile = db.county_leaders.find_one({"governor": governor_name})
+    if not profile:
+        return None
+
+    finances = list(db.county_finances.find({"governor": governor_name}))
+    audit = list(db.county_audit_findings.find({"governor": governor_name}))
+    departments = list(db.department_absorption.find({}))
+
+    # Calculate score
+    absorption_rates = [d.get("absorption_rate", 0) for d in departments]
+    avg_absorption = sum(absorption_rates) / len(absorption_rates) if absorption_rates else 0
+
+    total_flagged_kshm = sum(
+        a.get("amount_flagged_kshm", 0)
+        for a in audit
+        if a.get("finding_type") == "misappropriation"
+    )
+    total_revenue_kshm = sum(f.get("amount_kshb", 0) for f in finances) * 1000
+    flagged_ratio = (total_flagged_kshm / total_revenue_kshm) if total_revenue_kshm else 0
+    audit_score = max(0, 100 - (flagged_ratio * 100))
+    score = round((0.6 * avg_absorption) + (0.4 * audit_score), 1)
+
+    # Title page
+    story.append(Spacer(1, 1.5*inch))
+    story.append(Paragraph("ACCOUNTABILITY REPORT", styles['ReportTitle']))
+    story.append(Spacer(1, 0.2*inch))
+    story.append(Paragraph(f"County Governor: {profile.get('name', governor_name)}", styles['ReportSubtitle']))
+    story.append(Paragraph(f"{profile.get('county', 'Nyeri')} County Government", styles['ReportSubtitle']))
+    story.append(Spacer(1, 0.5*inch))
+    story.append(Paragraph(f"Financial Year: 2024/25", styles['ReportSubtitle']))
+    story.append(Paragraph(f"Generated: {datetime.now().strftime('%B %d, %Y')}", styles['ReportSubtitle']))
+    story.append(Spacer(1, 0.5*inch))
+
+    # Score badge
+    score_table = create_score_badge(score, styles)
+    story.append(score_table)
+    story.append(Spacer(1, 0.3*inch))
+
+    # Executive Summary
+    story.append(PageBreak())
+    story.append(Paragraph("1. EXECUTIVE SUMMARY", styles['SectionHeading']))
+
+    summary_text = (
+        f"This report provides a comprehensive accountability assessment of {profile.get('county', 'Nyeri')} "
+        f"County under the leadership of Governor {profile.get('name', governor_name)} "
+        f"({profile.get('party', 'N/A')}, {profile.get('tenure', 'N/A')}). "
+        f"The overall accountability score is <b>{score}/100</b>, reflecting "
+        f"{'strong' if score >= 75 else 'moderate' if score >= 55 else 'concerning'} "
+        f"performance across financial management, audit outcomes, and service delivery."
+    )
+    story.append(Paragraph(summary_text, styles['ReportBody']))
+
+    # Key metrics table
+    story.append(Paragraph("Key Metrics at a Glance", styles['SubsectionHeading']))
+
+    total_revenue = sum(f.get("amount_kshb", 0) for f in finances)
+    total_development = sum(f.get("development_kshb", 0) for f in finances)
+    total_recurrent = sum(f.get("recurrent_kshb", 0) for f in finances)
+
+    metrics_data = [
+        ['Metric', 'Value'],
+        ['Accountability Score', f"{score}/100"],
+        ['Avg. Dept. Absorption', f"{avg_absorption:.1f}%"],
+        ['Total Revenue (FY24/25)', f"KSh {total_revenue:.2f}B"],
+        ['Development Expenditure', f"KSh {total_development:.2f}B"],
+        ['Recurrent Expenditure', f"KSh {total_recurrent:.2f}B"],
+        ['Audit Findings (Total)', str(len(audit))],
+        ['Misappropriation Findings', str(sum(1 for a in audit if a.get('finding_type') == 'misappropriation'))],
+        ['Amount Flagged', f"KSh {total_flagged_kshm:,.1f}M"],
+    ]
+
+    metrics_table = Table(metrics_data, colWidths=[2.5*inch, 2.5*inch])
+    metrics_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), REPORT_COLORS['table_header']),
+        ('TEXTCOLOR', (0, 0), (-1, 0), white),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('GRID', (0, 0), (-1, -1), 0.5, REPORT_COLORS['muted_text']),
+        ('TOPPADDING', (0, 0), (-1, -1), 5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [white, REPORT_COLORS['table_row_alt']]),
+    ]))
+    story.append(metrics_table)
+    story.append(Spacer(1, 0.3*inch))
+
+    # Financial Performance
+    story.append(Paragraph("2. FINANCIAL PERFORMANCE", styles['SectionHeading']))
+
+    if finances:
+        story.append(Paragraph("Revenue & Expenditure Overview", styles['SubsectionHeading']))
+
+        fin_data = [['Financial Year', 'Total Revenue (B)', 'Development (B)', 'Recurrent (B)', 'OSR (B)']]
+        for f in finances:
+            fin_data.append([
+                f.get('financial_year', 'N/A'),
+                f"{f.get('amount_kshb', 0):.2f}",
+                f"{f.get('development_kshb', 0):.2f}",
+                f"{f.get('recurrent_kshb', 0):.2f}",
+                f"{f.get('osr_kshb', 0):.2f}",
+            ])
+
+        fin_table = Table(fin_data, colWidths=[1.2*inch, 1.2*inch, 1.2*inch, 1.2*inch, 1.2*inch])
+        fin_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), REPORT_COLORS['table_header']),
+            ('TEXTCOLOR', (0, 0), (-1, 0), white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('GRID', (0, 0), (-1, -1), 0.5, REPORT_COLORS['muted_text']),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [white, REPORT_COLORS['table_row_alt']]),
+        ]))
+        story.append(fin_table)
+        story.append(Spacer(1, 0.2*inch))
+
+    # Department Absorption
+    story.append(Paragraph("Departmental Budget Absorption", styles['SubsectionHeading']))
+
+    if departments:
+        dept_data = [['Department', 'Approved Budget (M)', 'Q3 Spend (M)', 'Absorption Rate', 'Status']]
+        for d in departments:
+            dept_data.append([
+                d.get('department', 'N/A'),
+                f"{d.get('approved_budget_kshm', 0):,.0f}",
+                f"{d.get('q3_spend_kshm', 0):,.0f}",
+                f"{d.get('absorption_rate', 0):.1f}%",
+                d.get('status', 'N/A'),
+            ])
+
+        dept_table = Table(dept_data, colWidths=[1.8*inch, 1.2*inch, 1.2*inch, 1*inch, 0.8*inch])
+        dept_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), REPORT_COLORS['table_header']),
+            ('TEXTCOLOR', (0, 0), (-1, 0), white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
+            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('GRID', (0, 0), (-1, -1), 0.5, REPORT_COLORS['muted_text']),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [white, REPORT_COLORS['table_row_alt']]),
+        ]))
+        story.append(dept_table)
+        story.append(Spacer(1, 0.2*inch))
+
+    # Audit Findings
+    story.append(Paragraph("3. AUDIT FINDINGS & COMPLIANCE", styles['SectionHeading']))
+
+    misappropriation_findings = [a for a in audit if a.get('finding_type') == 'misappropriation']
+    correct_findings = [a for a in audit if a.get('finding_type') in ['correct', 'correct_appropriation']]
+
+    story.append(Paragraph(
+        f"The Office of the Auditor-General issued {len(audit)} findings for the review period. "
+        f"Of these, <b>{len(misappropriation_findings)} flag misappropriation</b> totaling "
+        f"KSh {total_flagged_kshm:,.1f}M, while <b>{len(correct_findings)} confirm correct appropriation</b>.",
+        styles['ReportBody']
+    ))
+    story.append(Spacer(1, 0.1*inch))
+
+    if misappropriation_findings:
+        story.append(Paragraph("Misappropriation Findings", styles['SubsectionHeading']))
+        story.append(create_finding_table(misappropriation_findings, styles))
+        story.append(Spacer(1, 0.2*inch))
+
+    if correct_findings:
+        story.append(Paragraph("Correct Appropriation Findings", styles['SubsectionHeading']))
+        story.append(create_finding_table(correct_findings, styles))
+        story.append(Spacer(1, 0.2*inch))
+
+    # Risk Assessment
+    story.append(Paragraph("4. RISK ASSESSMENT & RECOMMENDATIONS", styles['SectionHeading']))
+
+    if score >= 75:
+        risk_level = "LOW"
+        risk_color = REPORT_COLORS['risk_low']
+        risk_text = (
+            "The county demonstrates strong financial stewardship with high budget absorption "
+            "and minimal audit flags. Continued transparency and proactive oversight are recommended."
+        )
+    elif score >= 55:
+        risk_level = "MODERATE"
+        risk_color = REPORT_COLORS['risk_medium']
+        risk_text = (
+            "The county shows mixed performance. While some departments perform well, audit findings "
+            "indicate areas needing improvement. Strengthening internal controls and procurement "
+            "processes should be prioritized."
+        )
+    else:
+        risk_level = "HIGH"
+        risk_color = REPORT_COLORS['risk_high']
+        risk_text = (
+            "Significant concerns exist regarding financial management and compliance. "
+            "Multiple adverse audit findings and low absorption rates suggest systemic issues. "
+            "Immediate corrective action and enhanced oversight are required."
+        )
+
+    story.append(Paragraph(f"Overall Risk Level: <font color='{risk_color}'><b>{risk_level}</b></font>", styles['ReportBody']))
+    story.append(Paragraph(risk_text, styles['ReportBody']))
+    story.append(Spacer(1, 0.2*inch))
+
+    # Recommendations
+    story.append(Paragraph("Key Recommendations", styles['SubsectionHeading']))
+    recommendations = [
+        "Implement stricter procurement oversight to prevent misappropriation",
+        "Improve budget absorption rates, particularly in underperforming departments",
+        "Strengthen internal audit function and follow-up on recommendations",
+        "Enhance public participation in budget formulation and monitoring",
+        "Digitize financial records for real-time transparency",
+    ]
+    for i, rec in enumerate(recommendations, 1):
+        story.append(Paragraph(f"{i}. {rec}", styles['ReportBullet']))
+
+    return story
+
+
+def build_constituency_report_story(db, constituency_slug, styles):
+    """Build the PDF story (content) for a constituency/MP report."""
+    story = []
+
+    # Get data
+    constituency = db.constituencies.find_one({"slug": constituency_slug})
+    if not constituency:
+        return None
+
+    mp = db.mps.find_one({"constituency_slug": constituency_slug})
+    allocations = list(db.allocations.find({"constituency_slug": constituency_slug}))
+    audit = list(db.audit_findings.find({"constituency_slug": constituency_slug}))
+
+    # Calculate score using the same algorithm as the API
+    total_findings = len(audit)
+    correct_findings = sum(1 for a in audit if a.get("finding_type") == "correct_appropriation")
+    misappropriation_findings_count = sum(1 for a in audit if a.get("finding_type") == "misappropriation")
+
+    if total_findings > 0:
+        utilization_ratio = correct_findings / total_findings
+        utilization_score = utilization_ratio * 100
+    else:
+        utilization_score = 50
+
+    # Audit score
+    total_amount_at_risk = 0
+    for a in audit:
+        if a.get("finding_type") == "misappropriation":
+            amount = a.get("amount_at_risk", 0)
+            if isinstance(amount, str):
+                import re
+                num_match = re.search(r'[\d,]+\.?\d*', amount.replace(',', ''))
+                if num_match:
+                    amount = float(num_match.group())
+                else:
+                    amount = 0
+            total_amount_at_risk += amount
+
+    if misappropriation_findings_count > 0:
+        audit_score = max(0, 100 - (total_amount_at_risk / 100 * 100))
+    else:
+        audit_score = 100
+
+    # OAG score
+    opinion_scores = {"Unqualified": 90, "Unqualified*": 85, "Qualified": 60, "Adverse": 30, "Disclaimer": 20}
+    status_scores = {"Clean": 90, "Concerning": 40, "Unknown": 50}
+    oag_opinion = mp.get("oag_opinion", "") if mp else ""
+    audit_status = mp.get("audit_status", "") if mp else ""
+    opinion_score = opinion_scores.get(oag_opinion, 50)
+    status_score = status_scores.get(audit_status, 50)
+    oag_score = (opinion_score + status_score) / 2
+
+    score = round((0.3 * utilization_score) + (0.4 * audit_score) + (0.3 * oag_score), 1)
+
+    # Title page
+    story.append(Spacer(1, 1.5*inch))
+    story.append(Paragraph("ACCOUNTABILITY REPORT", styles['ReportTitle']))
+    story.append(Spacer(1, 0.2*inch))
+    story.append(Paragraph(f"Constituency: {constituency.get('name', constituency_slug)}", styles['ReportSubtitle']))
+    story.append(Spacer(1, 0.1*inch))
+    mp_name = mp.get('name', 'N/A') if mp else 'N/A'
+    story.append(Paragraph(f"Member of Parliament: {mp_name}", styles['ReportSubtitle']))
+    story.append(Paragraph(f"Party: {mp.get('party', 'N/A') if mp else 'N/A'} | {mp.get('tenure', 'N/A') if mp else 'N/A'}", styles['ReportSubtitle']))
+    story.append(Spacer(1, 0.5*inch))
+    story.append(Paragraph(f"Financial Year: 2024/25", styles['ReportSubtitle']))
+    story.append(Paragraph(f"Generated: {datetime.now().strftime('%B %d, %Y')}", styles['ReportSubtitle']))
+    story.append(Spacer(1, 0.5*inch))
+
+    # Score badge
+    score_table = create_score_badge(score, styles)
+    story.append(score_table)
+    story.append(Spacer(1, 0.3*inch))
+
+    # Executive Summary
+    story.append(PageBreak())
+    story.append(Paragraph("1. EXECUTIVE SUMMARY", styles['SectionHeading']))
+
+    total_allocation = sum(a.get("amount_kshm", 0) for a in allocations)
+
+    summary_text = (
+        f"This report provides an accountability assessment of the NG-CDF (National Government "
+        f"Constituencies Development Fund) for <b>{constituency.get('name', constituency_slug)} "
+        f"Constituency</b>, represented by <b>{mp_name}</b> "
+        f"({mp.get('party', 'N/A') if mp else 'N/A'}). "
+        f"The overall accountability score is <b>{score}/100</b>, reflecting "
+        f"{'strong' if score >= 75 else 'moderate' if score >= 55 else 'concerning'} "
+        f"performance across fund utilization, audit outcomes, and legislative oversight."
+    )
+    story.append(Paragraph(summary_text, styles['ReportBody']))
+
+    # Key metrics
+    story.append(Paragraph("Key Metrics at a Glance", styles['SubsectionHeading']))
+
+    metrics_data = [
+        ['Metric', 'Value'],
+        ['Accountability Score', f"{score}/100"],
+        ['Total NG-CDF Allocation', f"KSh {total_allocation:,.1f}M"],
+        ['Audit Findings (Total)', str(total_findings)],
+        ['Misappropriation Findings', str(misappropriation_findings_count)],
+        ['Correct Appropriation Findings', str(correct_findings)],
+        ['Amount at Risk', f"KSh {total_amount_at_risk:,.1f}M"],
+        ['OAG Opinion', oag_opinion or 'N/A'],
+        ['Audit Status', audit_status or 'N/A'],
+    ]
+
+    metrics_table = Table(metrics_data, colWidths=[2.5*inch, 2.5*inch])
+    metrics_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), REPORT_COLORS['table_header']),
+        ('TEXTCOLOR', (0, 0), (-1, 0), white),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('GRID', (0, 0), (-1, -1), 0.5, REPORT_COLORS['muted_text']),
+        ('TOPPADDING', (0, 0), (-1, -1), 5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [white, REPORT_COLORS['table_row_alt']]),
+    ]))
+    story.append(metrics_table)
+    story.append(Spacer(1, 0.3*inch))
+
+    # Allocation Trend
+    story.append(Paragraph("2. NG-CDF ALLOCATION TRENDS", styles['SectionHeading']))
+
+    if allocations:
+        alloc_data = [['Financial Year', 'Amount (KSh M)', 'Category', 'Status']]
+        for a in allocations:
+            alloc_data.append([
+                a.get('fy_key', a.get('financial_year', 'N/A')).replace('FY', '').replace('_', '/'),
+                f"{a.get('amount_kshm', 0):,.1f}",
+                a.get('category', 'General'),
+                a.get('status', 'Disbursed'),
+            ])
+
+        alloc_table = Table(alloc_data, colWidths=[1.5*inch, 1.5*inch, 1.5*inch, 1.5*inch])
+        alloc_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), REPORT_COLORS['table_header']),
+            ('TEXTCOLOR', (0, 0), (-1, 0), white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('GRID', (0, 0), (-1, -1), 0.5, REPORT_COLORS['muted_text']),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [white, REPORT_COLORS['table_row_alt']]),
+        ]))
+        story.append(alloc_table)
+        story.append(Spacer(1, 0.2*inch))
+
+    # Audit Findings
+    story.append(Paragraph("3. AUDIT FINDINGS & COMPLIANCE", styles['SectionHeading']))
+
+    misappropriation_findings = [a for a in audit if a.get('finding_type') == 'misappropriation']
+    correct_findings = [a for a in audit if a.get('finding_type') == 'correct_appropriation']
+
+    story.append(Paragraph(
+        f"The Office of the Auditor-General issued {total_findings} findings for the review period. "
+        f"Of these, <b>{len(misappropriation_findings)} flag misappropriation</b> with "
+        f"KSh {total_amount_at_risk:,.1f}M at risk, while "
+        f"<b>{len(correct_findings)} confirm correct appropriation</b>.",
+        styles['ReportBody']
+    ))
+    story.append(Spacer(1, 0.1*inch))
+
+    if misappropriation_findings:
+        story.append(Paragraph("Misappropriation Findings", styles['SubsectionHeading']))
+        story.append(create_finding_table(misappropriation_findings, styles))
+        story.append(Spacer(1, 0.2*inch))
+
+    if correct_findings:
+        story.append(Paragraph("Correct Appropriation Findings", styles['SubsectionHeading']))
+        story.append(create_finding_table(correct_findings, styles))
+        story.append(Spacer(1, 0.2*inch))
+
+    # Risk Assessment
+    story.append(Paragraph("4. RISK ASSESSMENT & RECOMMENDATIONS", styles['SectionHeading']))
+
+    if score >= 75:
+        risk_level = "LOW"
+        risk_color = REPORT_COLORS['risk_low']
+        risk_text = (
+            "The constituency demonstrates strong NG-CDF management with high correct appropriation "
+            "rates and minimal audit flags. Continued transparency and community engagement are recommended."
+        )
+    elif score >= 55:
+        risk_level = "MODERATE"
+        risk_color = REPORT_COLORS['risk_medium']
+        risk_text = (
+            "The constituency shows mixed NG-CDF performance. While some funds are well-utilized, "
+            "audit findings indicate areas needing improvement. Strengthening project monitoring and "
+            "procurement processes should be prioritized."
+        )
+    else:
+        risk_level = "HIGH"
+        risk_color = REPORT_COLORS['risk_high']
+        risk_text = (
+            "Significant concerns exist regarding NG-CDF management and compliance. "
+            "Multiple adverse audit findings suggest systemic issues in fund utilization. "
+            "Immediate corrective action and enhanced community oversight are required."
+        )
+
+    story.append(Paragraph(f"Overall Risk Level: <font color='{risk_color}'><b>{risk_level}</b></font>", styles['ReportBody']))
+    story.append(Paragraph(risk_text, styles['ReportBody']))
+    story.append(Spacer(1, 0.2*inch))
+
+    # Recommendations
+    story.append(Paragraph("Key Recommendations", styles['SubsectionHeading']))
+    recommendations = [
+        "Implement community monitoring committees for all NG-CDF projects",
+        "Improve procurement transparency and competitive bidding processes",
+        "Ensure timely project completion and proper documentation",
+        "Strengthen the NG-CDF committee's oversight capacity",
+        "Publish quarterly fund utilization reports for public scrutiny",
+    ]
+    for i, rec in enumerate(recommendations, 1):
+        story.append(Paragraph(f"{i}. {rec}", styles['ReportBullet']))
+
+    return story
+
+
+@reports_bp.route("/governor/<governor_name>/pdf", methods=["GET"])
+def generate_governor_pdf_report(governor_name):
+    """Generate a PDF accountability report for a governor."""
+    try:
+        db = get_db()
+
+        # Verify governor exists
+        profile = db.county_leaders.find_one({"governor": governor_name})
+        if not profile:
+            return jsonify({"error": f"Governor {governor_name} not found"}), 404
+
+        styles = get_report_styles()
+        story = build_governor_report_story(db, governor_name, styles)
+
+        if not story:
+            return jsonify({"error": "Failed to build report"}), 500
+
+        # Build PDF
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            leftMargin=0.75*inch,
+            rightMargin=0.75*inch,
+            topMargin=0.8*inch,
+            bottomMargin=0.8*inch,
+        )
+
+        def page_template(canvas, doc):
+            add_header_footer(canvas, doc, "Governor Accountability Report", profile.get('county', 'Nyeri') + " County")
+
+        doc.build(story, onFirstPage=page_template, onLaterPages=page_template)
+        buffer.seek(0)
+
+        return send_file(
+            buffer,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=f'{governor_name}_accountability_report_{datetime.now().strftime("%Y%m%d")}.pdf'
+        )
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": "Failed to generate governor PDF report", "details": str(e)}), 500
+
+
+@reports_bp.route("/constituency/<constituency_slug>/pdf", methods=["GET"])
+def generate_constituency_pdf_report(constituency_slug):
+    """Generate a PDF accountability report for a constituency/MP."""
+    try:
+        db = get_db()
+
+        # Verify constituency exists
+        constituency = db.constituencies.find_one({"slug": constituency_slug})
+        if not constituency:
+            return jsonify({"error": f"Constituency {constituency_slug} not found"}), 404
+
+        mp = db.mps.find_one({"constituency_slug": constituency_slug})
+
+        styles = get_report_styles()
+        story = build_constituency_report_story(db, constituency_slug, styles)
+
+        if not story:
+            return jsonify({"error": "Failed to build report"}), 500
+
+        # Build PDF
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            leftMargin=0.75*inch,
+            rightMargin=0.75*inch,
+            topMargin=0.8*inch,
+            bottomMargin=0.8*inch,
+        )
+
+        entity_name = f"{constituency.get('name', constituency_slug)} Constituency"
+        mp_name = mp.get('name', '') if mp else ''
+        title = f"MP/Constituency Accountability Report — {mp_name}"
+
+        def page_template(canvas, doc):
+            add_header_footer(canvas, doc, title, entity_name)
+
+        doc.build(story, onFirstPage=page_template, onLaterPages=page_template)
+        buffer.seek(0)
+
+        return send_file(
+            buffer,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=f'{constituency_slug}_accountability_report_{datetime.now().strftime("%Y%m%d")}.pdf'
+        )
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": "Failed to generate constituency PDF report", "details": str(e)}), 500
 
 @reports_bp.route("/governor/<governor_name>", methods=["GET"])
 def generate_governor_report(governor_name):

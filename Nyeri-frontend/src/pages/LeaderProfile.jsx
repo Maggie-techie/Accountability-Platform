@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { LineChart, Line, XAxis, YAxis, Tooltip as RTooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
-import { FileDown, MessageCircleQuestion } from 'lucide-react'
-import { Card, Badge, Button } from '../components/ui'
+import { FileDown, MessageCircleQuestion, AlertCircle } from 'lucide-react'
+import { Card, Badge, Button, Toast } from '../components/ui'
 import { Breadcrumbs, Tabs } from '../components/DataDisplay'
 import { ScoreGauge, AIDisclaimer } from '../components/Insights'
 import { LEADER_PHOTOS } from '../utils/leaderPhotos'
@@ -57,6 +57,7 @@ export default function LeaderProfile() {
   const [governorScore, setGovernorScore] = useState(null)
   const [constituencyScore, setConstituencyScore] = useState(null)
   const [countyFinances, setCountyFinances] = useState(null)
+  const [toast, setToast] = useState(null)
 
   // Fetch AI module data - defined inside component to access `slug` from useParams
   const fetchAiModule = useCallback(async (key, isGovernor) => {
@@ -75,6 +76,42 @@ export default function LeaderProfile() {
       return null
     }
   }, [slug])
+
+  // Download PDF report
+  const handleDownloadReport = useCallback(async () => {
+    if (!slug) return
+
+    try {
+      setToast({ type: 'info', message: 'Generating report...' })
+      let blob
+      if (isGovernor && governorData) {
+        blob = await APIService.downloadGovernorPDFReport(governorData.governor || governorData.name)
+      } else if (constituency) {
+        blob = await APIService.downloadConstituencyPDFReport(constituency.slug)
+      } else {
+        setToast({ type: 'error', message: 'Unable to generate report - leader not found' })
+        return
+      }
+
+      // Create download link
+      const url = window.URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      const leaderName = isGovernor
+        ? (governorData?.name || 'governor').replace(/\s+/g, '_')
+        : (constituency?.mp?.name || constituency?.name || 'mp').replace(/\s+/g, '_')
+      a.download = `${leaderName}_accountability_report.pdf`
+      document.body.appendChild(a)
+      a.click()
+      window.URL.revokeObjectURL(url)
+      document.body.removeChild(a)
+
+      setToast({ type: 'success', message: 'Report downloaded successfully!' })
+    } catch (err) {
+      console.error('Error downloading report:', err)
+      setToast({ type: 'error', message: err.message || 'Failed to generate report' })
+    }
+  }, [slug, isGovernor, governorData, constituency])
 
   useEffect(() => {
     const fetchData = async () => {
@@ -237,7 +274,7 @@ export default function LeaderProfile() {
           </div>
         </div>
         <div className="flex flex-wrap gap-3 mt-6 pt-6 border-t border-line">
-          <Button><FileDown size={16} /> Generate Accountability Report</Button>
+          <Button onClick={handleDownloadReport}><FileDown size={16} /> Generate Accountability Report</Button>
           <Button variant="secondary" onClick={() => navigate(`/assistant?about=${encodeURIComponent(name || '')}`)}>
             <MessageCircleQuestion size={16} /> Ask AI about this leader
           </Button>
@@ -383,6 +420,15 @@ export default function LeaderProfile() {
           </div>
         )}
       </div>
+
+      {toast && (
+        <Toast
+          type={toast.type}
+          message={toast.message}
+          onClose={() => setToast(null)}
+          duration={5000}
+        />
+      )}
     </div>
   )
 }

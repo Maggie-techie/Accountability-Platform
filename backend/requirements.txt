@@ -15,3 +15,4 @@ sentence-transformers
 pydantic
 pydantic-settings
 pydantic-ai-slim[groq]
+reportlab
