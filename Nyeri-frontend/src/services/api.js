@@ -49,16 +49,43 @@ class APIService {
     const constituenciesResponse = await this.getAllConstituencies({ limit: 50 });
     const constituencies = constituenciesResponse.constituencies || constituenciesResponse;
 
-    const scores = await Promise.all(
-      constituencies.map(c =>
-        this.getConstituencyScore(c.slug).catch(() => ({ score: null }))
-      )
-    );
+    // Fetch scores, allocations, and audit findings for each constituency in parallel
+    const [scores, allocations, auditFindings, mps] = await Promise.all([
+      Promise.all(constituencies.map(c => this.getConstituencyScore(c.slug).catch(() => ({ score: null })))),
+      Promise.all(constituencies.map(c => this.getConstituencyAllocations(c.slug).catch(() => ({ allocations: [] })))),
+      Promise.all(constituencies.map(c => this.getConstituencyAuditFindings(c.slug).catch(() => ({ audit_findings: [] })))),
+      Promise.all(constituencies.map(c => this.getMPByConstituency(c.slug).catch(() => ({ }))))
+    ]);
 
-    return constituencies.map((c, i) => ({
-      ...c,
-      accountabilityScore: scores[i]?.score ?? c.accountabilityScore ?? null
-    }));
+    return constituencies.map((c, i) => {
+      const constituencyAllocations = allocations[i]?.allocations || allocations[i] || [];
+      const constituencyAudit = auditFindings[i]?.audit_findings || auditFindings[i] || [];
+      const mpData = mps[i] || {};
+
+      // Calculate total allocation
+      const totalAllocationKshm = constituencyAllocations.reduce((sum, a) => sum + (a.amount_kshm || 0), 0);
+
+      // Count misappropriations
+      const misappropriationCount = constituencyAudit.filter(f => f.finding_type === 'misappropriation' || f.finding_type === 'Misappropriation').length;
+
+      // Get audit status from MP data
+      const auditStatus = mpData.audit_status || mpData.auditStatus || 'Unknown';
+
+      return {
+        ...c,
+        accountabilityScore: scores[i]?.score ?? c.accountabilityScore ?? null,
+        totalAllocationKshm: totalAllocationKshm,
+        misappropriationCount: misappropriationCount,
+        auditStatus: auditStatus,
+        mp: mpData.name ? { name: mpData.name, party: mpData.party } : c.mp
+      };
+    });
+  }
+
+  // Get MP by constituency slug
+  static async getMPByConstituency(slug) {
+    const response = await fetch(`${this.baseURL}/constituency/mps/${slug}`);
+    return response.json();
   }
 
   // Governor endpoints
@@ -146,6 +173,20 @@ class APIService {
   // MP AI Anomalies
   static async getMPAIAnomalies(constituencySlug) {
     const response = await fetch(`${this.baseURL}/ai/mp/${constituencySlug}/anomalies`);
+    return response.json();
+  }
+
+  // County findings classifier (for anomalies with severity)
+  static async getCountyFindingsClassifier(findingId = null, findingText = null) {
+    const body = {};
+    if (findingId) body.finding_id = findingId;
+    if (findingText) body.finding_text = findingText;
+
+    const response = await fetch(`${this.baseURL}/ai/county/findings/classifier`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
     return response.json();
   }
 }

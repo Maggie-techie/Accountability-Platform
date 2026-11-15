@@ -44,8 +44,62 @@ def get_finances():
         query = {}
         if year:
             query["financial_year"] = year
-        data = list(db.county_finances.find(query))
-        full_data = serializable_doc(data)
+
+        # Get raw financial data
+        raw_data = list(db.county_finances.find(query))
+
+        # Pivot data by financial_year to match frontend expectations
+        # Database has rows with revenue_source + amount_kshb
+        # Frontend expects one document per FY with: equitable_share_kshb, conditional_grants_kshb, osr_kshb, expenditure_kshb
+        pivoted = {}
+        for row in raw_data:
+            fy = row.get("financial_year", "Unknown")
+            if fy not in pivoted:
+                pivoted[fy] = {
+                    "financial_year": fy,
+                    "equitable_share_kshb": 0,
+                    "conditional_grants_kshb": 0,
+                    "osr_kshb": 0,
+                    "expenditure_kshb": 0,
+                    "development_kshb": 0,
+                    "recurrent_kshb": 0,
+                    "osr_target_kshb": 0,
+                    "county": row.get("county", "Nyeri"),
+                    "county_code": row.get("county_code", "019"),
+                    "governor": row.get("governor", "")
+                }
+
+            source = row.get("revenue_source", "").lower()
+            amount = row.get("amount_kshb", 0)
+
+            # Map revenue_source to expected fields
+            if "equitable" in source:
+                pivoted[fy]["equitable_share_kshb"] = amount
+            elif "conditional" in source:
+                pivoted[fy]["conditional_grants_kshb"] = amount
+            elif "own source" in source or "osr" in source:
+                pivoted[fy]["osr_kshb"] = amount
+            elif "expenditure" in source or "total" in source:
+                pivoted[fy]["expenditure_kshb"] = amount
+            elif "development" in source:
+                pivoted[fy]["development_kshb"] = amount
+            elif "recurrent" in source:
+                pivoted[fy]["recurrent_kshb"] = amount
+
+        # Also copy other fields from raw data if present
+        for row in raw_data:
+            fy = row.get("financial_year", "Unknown")
+            if fy in pivoted:
+                # Copy any additional fields
+                for key in ["development_kshb", "recurrent_kshb", "osr_target_kshb"]:
+                    if key in row and row[key]:
+                        pivoted[fy][key] = row[key]
+
+        result = list(pivoted.values())
+        # Sort by financial_year
+        result.sort(key=lambda x: x.get("financial_year", ""))
+
+        full_data = serializable_doc(result)
         return jsonify(full_data), 200
     except Exception as e:
         return jsonify({"error": "Failed to retrieve finances", "details": str(e)}), 500

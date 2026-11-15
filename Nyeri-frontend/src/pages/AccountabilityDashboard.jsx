@@ -32,14 +32,14 @@ export default function AccountabilityDashboard() {
           financesResponse,
           departmentsResponse,
           auditResponse,
-          anomaliesResponse
+          findingsClassifierResponse
         ] = await Promise.all([
           APIService.getAllConstituencyScores(),
           APIService.getGovernorProfile(),
           APIService.getCountyFinances(),
           APIService.getDepartmentData(),
           APIService.getCountyAuditFindings(),
-          fetch(`${APIService.baseURL}/ai/county/narrative`).then(r => r.json()).catch(() => ({ success: false }))
+          APIService.getCountyFindingsClassifier().catch(() => ({ success: false }))
         ])
 
         setConstituencies(constituenciesData)
@@ -48,9 +48,9 @@ export default function AccountabilityDashboard() {
         setDepartments(departmentsResponse)
         setCountyAuditFindings(auditResponse.audit_findings || auditResponse || [])
 
-        // Parse anomalies from AI response
-        if (anomaliesResponse && anomaliesResponse.success && anomaliesResponse.data) {
-          const narrative = anomaliesResponse.data.narrative_fields || {}
+        // Parse anomalies from findings classifier response (has severity, category, entity, etc.)
+        if (findingsClassifierResponse && findingsClassifierResponse.success && findingsClassifierResponse.data) {
+          const narrative = findingsClassifierResponse.data.narrative_fields || {}
           if (narrative.findings && Array.isArray(narrative.findings)) {
             setAnomalies(narrative.findings)
           }
@@ -82,7 +82,7 @@ export default function AccountabilityDashboard() {
 
   const departmentsBelowTarget = departments.filter((d) => d.status !== 'On Track').length
 
-  // Build allocation trend data from county finances
+  // Build allocation trend data from county finances (now pivoted by the API)
   const allocationTrendData = countyFinances.map(f => ({
     fy: f.financial_year || 'N/A',
     'Equitable Share': f.equitable_share_kshb || 0,

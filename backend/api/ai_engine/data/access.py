@@ -20,7 +20,7 @@ class DataAccess:
         "mps": "mps",
         "county_leaders": "county_leaders",
         "county_finances": "county_finances",
-        "county_audit": "county_audit",
+        "county_audit_findings": "county_audit_findings",
         "department_absorption": "department_absorption",
         "gnn_anomalies": "gnn_anomalies",
         "projects": "projects",
@@ -88,7 +88,7 @@ class DataAccess:
 
     def get_county_audit_findings(self) -> list:
         """Get county audit findings."""
-        return list(self.collection("county_audit").find({}))
+        return list(self.collection("county_audit_findings").find({}))
 
     def get_department_absorption(self) -> list:
         """Get department absorption data."""
