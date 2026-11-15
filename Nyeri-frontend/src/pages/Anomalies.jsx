@@ -243,7 +243,7 @@ export default function Anomalies() {
     return (
       <div className="max-w-content mx-auto px-4 sm:px-6 py-8">
         <Breadcrumbs items={[{ label: 'Anomalies' }]} />
-        <h1 className="text-3xl font-semibold mb-1">All Anomalies (ML and AI)</h1>
+        <h1 className="text-3xl font-semibold mb-1">All County Financial Anomalies (ML & AI)</h1>
         <p className="text-ink-muted mb-6">Loading anomalies...</p>
       </div>
     )
@@ -253,7 +253,7 @@ export default function Anomalies() {
     return (
       <div className="max-w-content mx-auto px-4 sm:px-6 py-8">
         <Breadcrumbs items={[{ label: 'Anomalies' }]} />
-        <h1 className="text-3xl font-semibold mb-1">All Anomalies (ML and AI)</h1>
+        <h1 className="text-3xl font-semibold mb-1">All County Financial Anomalies (ML & AI)</h1>
         <p className="text-ink-danger mb-6">{error}</p>
         <div className="mt-4">
           <button onClick={() => window.location.reload()} className="btn btn-outline">
@@ -267,7 +267,7 @@ export default function Anomalies() {
   return (
     <div className="max-w-content mx-auto px-4 sm:px-6 py-8">
       <Breadcrumbs items={[{ label: 'Anomalies' }]} />
-      <h1 className="text-3xl font-semibold mb-1">All Anomalies (ML and AI)</h1>
+      <h1 className="text-3xl font-semibold mb-1">All County Financial Anomalies (ML & AI)</h1>
       <p className="text-ink-muted mb-6 max-w-2xl">
         Comprehensive view of anomalies detected across AI analysis, ML models, audit findings, and risk assessments.
       </p>
