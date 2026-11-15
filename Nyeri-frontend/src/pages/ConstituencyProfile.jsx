@@ -17,6 +17,7 @@ export default function ConstituencyProfile() {
   const [anomaliesData, setAnomaliesData] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [accountabilityScore, setAccountabilityScore] = useState(null)
 
   useEffect(() => {
     const fetchData = async () => {
@@ -33,6 +34,7 @@ export default function ConstituencyProfile() {
         let allocationsResponse = null
         let auditResponse = null
         let anomaliesResponse = { success: false, data: [] }
+        let scoreResponse = null
 
         try {
           constituencyResponse = await APIService.getConstituencyBySlug(slug)
@@ -52,6 +54,13 @@ export default function ConstituencyProfile() {
           console.error('Error fetching audit findings:', err)
         }
 
+        // Fetch accountability score
+        try {
+          scoreResponse = await APIService.getConstituencyScore(slug)
+        } catch (err) {
+          console.error('Error fetching accountability score:', err)
+        }
+
         // Fetch anomalies from AI endpoint
         try {
           const res = await fetch(`${APIService.baseURL}/ai/mp/${slug}/anomalies`)
@@ -63,6 +72,10 @@ export default function ConstituencyProfile() {
 
         if (constituencyResponse) {
           setConstituency(constituencyResponse)
+        }
+
+        if (scoreResponse) {
+          setAccountabilityScore(scoreResponse.score)
         }
 
         // Process allocations data for chart
@@ -207,7 +220,7 @@ export default function ConstituencyProfile() {
         </div>
         <div className="flex items-center gap-4">
           <div className="text-center">
-            <p className="text-2xl font-serif font-semibold text-forest-700">{constituency.accountabilityScore || 0}</p>
+            <p className="text-2xl font-serif font-semibold text-forest-700">{accountabilityScore ?? 0}</p>
             <p className="text-xs text-ink-muted">Accountability score</p>
           </div>
           <Button variant="secondary"><FileDown size={16} /> Download report</Button>
