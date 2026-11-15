@@ -72,13 +72,14 @@ export default function LeaderProfile() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [governorScore, setGovernorScore] = useState(null)
+  const [constituencyScore, setConstituencyScore] = useState(null)
   const [countyFinances, setCountyFinances] = useState(null)
 
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true)
-        const [governorResponse, constituenciesResponse, scoreResponse, financesResponse] = await Promise.all([
+        const [governorResponse, constituenciesResponse, governorScoreResponse, financesResponse] = await Promise.all([
           APIService.getGovernorProfile(),
           APIService.getAllConstituencies(),
           APIService.getGovernorScore(),
@@ -87,13 +88,18 @@ export default function LeaderProfile() {
 
         setGovernorData(governorResponse)
         setConstituenciesData(constituenciesResponse.constituencies || constituenciesResponse)
-        setGovernorScore(scoreResponse)
+        setGovernorScore(governorScoreResponse)
         setCountyFinances(financesResponse)
 
         // Determine leader type now that we have governorResponse, so we hit the right module set
         const matchedGovernor = governorResponse && (slug === governorResponse._id || slug === governorResponse.id)
         const moduleList = matchedGovernor ? GOVERNOR_AI_MODULES : MP_AI_MODULES
-    
+
+        // Fetch MP constituency score if not governor
+        let constituencyScorePromise = Promise.resolve(null)
+        if (!matchedGovernor) {
+          constituencyScorePromise = APIService.getConstituencyScore(slug).catch(() => null)
+        }
 
         let auditResponse = null
         try {
@@ -102,6 +108,12 @@ export default function LeaderProfile() {
             : await APIService.getConstituencyAuditFindings(slug)
           } catch (err) {
             console.error('Error fetching audit findings:', err)
+          }
+
+          // Fetch and set MP constituency score
+          if (!matchedGovernor) {
+            const scoreData = await constituencyScorePromise
+            setConstituencyScore(scoreData?.score ?? null)
           }
 
           setAuditFindings((auditResponse && (auditResponse.audit_findings || auditResponse)) || [])
@@ -123,6 +135,7 @@ export default function LeaderProfile() {
         setAuditFindings([])
         setAiModuleResults([])
         setGovernorScore(null)
+        setConstituencyScore(null)
         setCountyFinances(null)
       } finally {
         setLoading(false)
@@ -169,7 +182,7 @@ export default function LeaderProfile() {
   const position = isGovernor ? 'Governor' : 'Member of Parliament'
   const party = isGovernor ? governorData.party : (constituency.mp?.party || constituency.party)
   const place = isGovernor ? (governorData.county || 'Nyeri County') : constituency.name
-  const score = isGovernor ? governorScore?.score : constituency?.accountabilityScore
+  const score = isGovernor ? governorScore?.score : constituencyScore
 
   const photoKey = isGovernor ? 'governor' : constituency.slug
   const photo = LEADER_PHOTOS[photoKey]

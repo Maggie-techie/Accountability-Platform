@@ -16,6 +16,7 @@ export default function Leaders() {
 
   // State for data fetching
   const [governorData, setGovernorData] = useState(null)
+  const [governorScore, setGovernorScore] = useState(null)
   const [constituenciesData, setConstituenciesData] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
@@ -24,18 +25,21 @@ export default function Leaders() {
     const fetchData = async () => {
       try {
         setLoading(true)
-        // Fetch governor data and constituencies with scores in parallel
-        const [governorResponse, constituenciesWithScores] = await Promise.all([
+        // Fetch governor data, governor score, and constituencies with scores in parallel
+        const [governorResponse, governorScoreResponse, constituenciesWithScores] = await Promise.all([
           APIService.getGovernorProfile(),
+          APIService.getGovernorScore(),
           APIService.getAllConstituencyScores()
         ])
 
         setGovernorData(governorResponse)
+        setGovernorScore(governorScoreResponse.score)
         setConstituenciesData(constituenciesWithScores)
         setError(null)
       } catch (err) {
         setError(err.message || 'Failed to load leaders data')
         setGovernorData(null)
+        setGovernorScore(null)
         setConstituenciesData([])
       } finally {
         setLoading(false)
@@ -57,7 +61,7 @@ export default function Leaders() {
         position: 'Governor',
         party: governorData.party,
         place: governorData.county,
-        score: governorData.accountabilityScore,
+        score: governorScore,
         summary: governorData.summary
       })
     }
@@ -79,7 +83,7 @@ export default function Leaders() {
     })
 
     return leaders
-  }, [governorData, constituenciesData])
+  }, [governorData, governorScore, constituenciesData])
   
   const filtered = useMemo(() => {
     return allLeaders.filter((l) =>
