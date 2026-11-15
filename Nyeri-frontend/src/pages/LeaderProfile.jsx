@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { LineChart, Line, XAxis, YAxis, Tooltip as RTooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
-import { FileDown, MessageCircleQuestion, AlertCircle } from 'lucide-react'
+import { FileDown, MessageCircleQuestion } from 'lucide-react'
 import { Card, Badge, Button, Toast } from '../components/ui'
 import { Breadcrumbs, Tabs } from '../components/DataDisplay'
 import { ScoreGauge, AIDisclaimer } from '../components/Insights'
@@ -59,13 +59,26 @@ export default function LeaderProfile() {
   const [countyFinances, setCountyFinances] = useState(null)
   const [toast, setToast] = useState(null)
 
+  // Compute leader type and constituency early so hooks can use them
+  const isGovernor = Boolean(
+    governorData &&
+    slug &&
+    (slug === governorData._id || slug === governorData.id)
+  )
+  const constituency = constituenciesData.find((c) => c.slug === slug || c._id === slug)
+
   // Fetch AI module data - defined inside component to access `slug` from useParams
-  const fetchAiModule = useCallback(async (key, isGovernor) => {
+  const fetchAiModule = useCallback(async (key, isGov) => {
     try {
-      const url = isGovernor
+      const url = isGov
         ? `${APIService.baseURL}/ai/governor/${key}`
         : `${APIService.baseURL}/ai/mp/${slug}/${key}`
       const res = await fetch(url)
+      if (!res.ok) {
+        const errorData = await res.json().catch(() => ({}))
+        console.warn(`AI module ${key} returned error:`, res.status, errorData)
+        return null
+      }
       const json = await res.json()
       if (json?.success && json.data) {
         return { narrative_fields: json.data.narrative_fields || {}, chart_data: json.data.chart_data || {} }
@@ -202,15 +215,6 @@ export default function LeaderProfile() {
       </div>
     )
   }
-
-  // Match either the governor (_id or legacy id) or a constituency (slug or _id)
-  const isGovernor = Boolean(
-  governorData &&
-  slug &&
-  (slug === governorData._id || slug === governorData.id)
-  )
-  //const isGovernor = governorData && (slug === governorData._id || slug === governorData.id)
-  const constituency = constituenciesData.find((c) => c.slug === slug || c._id === slug)
 
   if (!isGovernor && !constituency) {
     return <div className="max-w-content mx-auto px-6 py-16 text-center text-ink-muted">Leader not found.</div>

@@ -98,7 +98,7 @@ def mp_anomalies(constituency_slug):
         constituency_summary = generate_constituency_summary(constituency_slug, "anomalies")
         governor_summary = generate_governor_summary("anomalies")
 
-        # Build prompt with GNN context
+        # Build prompt with GNN context - matching AnomaliesOutput schema
         prompt = f"""You are a financial analyst explaining anomalies and audit findings for the constituency '{constituency_slug}'.
 
 The Graph Neural Network (GNN) model analyzes constituency-year and governor-year nodes in a financial graph, detecting anomalies via:
@@ -118,14 +118,26 @@ Governor Summary:
 Return ONLY a JSON object with exactly this structure (all keys required):
 {{
   "narrative_fields": {{
-    "summary": "Plain-language summary of anomalies and audit findings for citizens",
-    "what_was_found": "What the GNN model and audits detected, explained simply",
-    "why_it_matters": "Why these anomalies matter for public funds and services",
-    "recommended_actions": "Specific steps citizens and officials should take",
-    "confidence_level": "How confident the analysis is and any limitations"
-  }}
+    "anomalies_found": 0,
+    "summary": "Plain-language summary of anomalies and audit findings for citizens (min 50 chars)",
+    "anomalies": [
+      {{
+        "title": "Anomaly title",
+        "description": "Detailed description of the anomaly (min 30 chars)",
+        "severity": "High|Medium|Low",
+        "amount_at_risk": "Amount at risk as string",
+        "category": "procurement|payroll|budget|project|other",
+        "year": "Fiscal year",
+        "source": "Source of detection"
+      }}
+    ],
+    "what_this_means": "What these anomalies mean for citizens and public funds (min 30 chars)",
+    "citizen_actions": ["Action 1", "Action 2"],
+    "data_quality_note": "Note about data quality and limitations"
+  }},
+  "chart_data": {{"sample_array": [], "sample_labels": []}}
 }}
-NOTE: Provide comprehensive, accessible narratives. Charts/tables are rendered separately by the frontend."""
+NOTE: Provide comprehensive, accessible narratives. The anomalies array can be empty if none found. Charts/tables are rendered separately by the frontend."""
 
         from ..core.cache import get_or_compute_ai_response
         from ..core.llm import call_llm_json
