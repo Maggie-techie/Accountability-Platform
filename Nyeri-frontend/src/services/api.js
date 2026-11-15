@@ -182,7 +182,7 @@ class APIService {
     if (findingId) body.finding_id = findingId;
     if (findingText) body.finding_text = findingText;
 
-    const response = await fetch(`${this.baseURL}/ai/county/findings/classifier`, {
+    const response = await fetch(`${this.baseURL}/ai/findings/classifier`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(body)
