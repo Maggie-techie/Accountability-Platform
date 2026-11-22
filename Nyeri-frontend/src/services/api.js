@@ -154,6 +154,16 @@ class APIService {
     return response.blob();
   }
 
+  // County-wide aggregated report (Governor + all Constituencies)
+  static async downloadCountyPDFReport() {
+    const response = await fetch(`${this.baseURL}/reports/county/pdf`);
+    if (!response.ok) {
+      const error = await response.json().catch(() => ({ error: 'Failed to generate report' }));
+      throw new Error(error.error || error.details || 'Failed to generate county report');
+    }
+    return response.blob();
+  }
+
   // Anomaly endpoints
   static async getGovernorTopRisks() {
     const response = await fetch(`${this.baseURL}/ai/governor/top_risks`);

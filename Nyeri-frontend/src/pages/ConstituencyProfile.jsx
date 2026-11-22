@@ -6,184 +6,119 @@ import { Card, Badge, Button, Toast } from '../components/ui'
 import { Breadcrumbs } from '../components/DataDisplay'
 import { AIDisclaimer } from '../components/Insights'
 import APIService from '../services/api'
+import { useSharedAsyncData } from '../hooks/useAsyncData.jsx'
 
 export default function ConstituencyProfile() {
   const { slug } = useParams()
-
-  // State for data fetching
-  const [constituency, setConstituency] = useState(null)
-  const [allocationTrend, setAllocationTrend] = useState([])
-  const [auditFindings, setAuditFindings] = useState([])
-  const [anomaliesData, setAnomaliesData] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [accountabilityScore, setAccountabilityScore] = useState(null)
   const [toast, setToast] = useState(null)
 
-  useEffect(() => {
-    const fetchData = async () => {
-      if (!slug) {
-        setError('Constituency slug is required')
-        setLoading(false)
-        return
-      }
+  // Fetch data independently with persistent caching (slug-specific keys)
+  const { data: constituency, isLoading: constLoading, error: constError } = useSharedAsyncData(
+    `constituency-profile-${slug}`,
+    () => slug ? APIService.getConstituencyBySlug(slug) : Promise.resolve(null),
+    { cacheTime: 10 * 60 * 1000, immediate: !!slug }
+  )
 
+  const { data: allocationsResponse, isLoading: allocLoading } = useSharedAsyncData(
+    `constituency-allocations-${slug}`,
+    () => slug ? APIService.getConstituencyAllocations(slug) : Promise.resolve(null),
+    { cacheTime: 10 * 60 * 1000, immediate: !!slug }
+  )
+
+  const { data: auditResponse, isLoading: auditLoading } = useSharedAsyncData(
+    `constituency-audit-${slug}`,
+    () => slug ? APIService.getConstituencyAuditFindings(slug) : Promise.resolve(null),
+    { cacheTime: 5 * 60 * 1000, immediate: !!slug }
+  )
+  const auditFindings = auditResponse?.audit_findings || auditResponse || []
+
+  const { data: scoreResponse, isLoading: scoreLoading } = useSharedAsyncData(
+    `constituency-score-${slug}`,
+    () => slug ? APIService.getConstituencyScore(slug) : Promise.resolve(null),
+    { cacheTime: 10 * 60 * 1000, immediate: !!slug }
+  )
+  const accountabilityScore = scoreResponse?.score
+
+  // Fetch anomalies from AI endpoint
+  const { data: anomaliesResponse, isLoading: anomaliesLoading } = useSharedAsyncData(
+    `constituency-anomalies-${slug}`,
+    async () => {
+      if (!slug) return { success: false, data: [] }
       try {
-        setLoading(true)
-        // Fetch all required data
-        let constituencyResponse = null
-        let allocationsResponse = null
-        let auditResponse = null
-        let anomaliesResponse = { success: false, data: [] }
-        let scoreResponse = null
-
-        try {
-          constituencyResponse = await APIService.getConstituencyBySlug(slug)
-        } catch (err) {
-          console.error('Error fetching constituency:', err)
-        }
-
-        try {
-          allocationsResponse = await APIService.getConstituencyAllocations(slug)
-        } catch (err) {
-          console.error('Error fetching allocations:', err)
-        }
-
-        try {
-          auditResponse = await APIService.getConstituencyAuditFindings(slug)
-        } catch (err) {
-          console.error('Error fetching audit findings:', err)
-        }
-
-        // Fetch accountability score
-        try {
-          scoreResponse = await APIService.getConstituencyScore(slug)
-        } catch (err) {
-          console.error('Error fetching accountability score:', err)
-        }
-
-        // Fetch anomalies from AI endpoint
-        try {
-          const res = await fetch(`${APIService.baseURL}/ai/mp/${slug}/anomalies`)
-          if (res.ok) {
-            anomaliesResponse = await res.json()
-          } else {
-            const errorData = await res.json().catch(() => ({}))
-            console.warn('Anomalies endpoint returned error:', res.status, errorData)
-            anomaliesResponse = { success: false, error: errorData.error || 'Failed to fetch anomalies' }
-          }
-        } catch (err) {
-          console.warn('Could not fetch anomalies from AI endpoint:', err)
-          anomaliesResponse = { success: false, error: err.message }
-          // Fallback to empty anomalies
-        }
-
-        if (constituencyResponse) {
-          setConstituency(constituencyResponse)
-        }
-
-        if (scoreResponse) {
-          setAccountabilityScore(scoreResponse.score)
-        }
-
-        // Process allocations data for chart
-        // We need to transform allocations to match the mock allocationTrend format:
-        // [{ fy: '2022/23', Kieni: 165.7, Mathira: 151.9, Othaya: 118.0, Tetu: 131.3, 'Mukurwe-ini': 110.2, 'Nyeri Town': 120.8 }, ...]
-
-        // Helper to convert slug to proper constituency name for chart keys
-        const slugToChartKey = (slug) => {
-          const map = {
-            'kieni': 'Kieni',
-            'mathira': 'Mathira',
-            'othaya': 'Othaya',
-            'tetu': 'Tetu',
-            'mukurweini': 'Mukurwe-ini',
-            'nyeri_town': 'Nyeri Town',
-          }
-          return map[slug] || slug
-        }
-
-        if (allocationsResponse && allocationsResponse.allocations) {
-          // Group allocations by fiscal year and constituency
-          const allocationsByYear = {}
-
-          // First, let's get all constituencies to know what we're dealing with
-          // For now, we'll process what we have
-          allocationsResponse.allocations.forEach(alloc => {
-            const fy = alloc.fy_key || alloc.financial_year || 'Unknown'
-            if (!allocationsByYear[fy]) {
-              allocationsByYear[fy] = { fy }
-            }
-
-            // Assuming the allocation record has amount and references to constituency
-            const constituencyIdentifier = alloc.constituency_slug ||
-                                         alloc.name ||
-                                         (alloc.entity && alloc.entity.name) ||
-                                         'unknown'
-
-            const amount = alloc.amount_kshm || alloc.amount || alloc.allocated_amount || 0
-
-            if (constituencyIdentifier && constituencyIdentifier !== 'unknown') {
-              // Convert slug to proper chart key
-              const chartKey = slugToChartKey(constituencyIdentifier)
-              allocationsByYear[fy][chartKey] = amount
-            }
-          })
-
-          // Convert to array format expected by chart
-          // We need to ensure all constituencies are represented for each year
-          // For simplicity, we'll use the data as-is and enhance later if needed
-          const trendArray = Object.keys(allocationsByYear)
-            .map(fy => ({
-              fy,
-              ...allocationsByYear[fy]
-            }))
-            .sort((a, b) => {
-              // Sort by fiscal year (assuming format like "2022/23")
-              const yearA = parseInt(a.fy.split('/')[0])
-              const yearB = parseInt(b.fy.split('/')[0])
-              return yearA - yearB
-            })
-
-          setAllocationTrend(trendArray)
+        const res = await fetch(`${APIService.baseURL}/ai/mp/${slug}/anomalies`)
+        if (res.ok) {
+          return await res.json()
         } else {
-          setAllocationTrend([])
+          const errorData = await res.json().catch(() => ({}))
+          return { success: false, error: errorData.error || 'Failed to fetch anomalies' }
         }
-
-        if (auditResponse && auditResponse.audit_findings) {
-          setAuditFindings(auditResponse.audit_findings)
-        } else {
-          setAuditFindings([])
-        }
-
-        if (anomaliesResponse && anomaliesResponse.success) {
-          // Handle different possible response formats from AI endpoint
-          if (Array.isArray(anomaliesResponse.data)) {
-            setAnomaliesData(anomaliesResponse.data)
-          } else if (anomaliesResponse.anomalies) {
-            setAnomaliesData(anomaliesResponse.anomalies)
-          } else {
-            setAnomaliesData([])
-          }
-        } else {
-          setAnomaliesData([])
-        }
-
-        setError(null)
       } catch (err) {
-        console.error('Error fetching constituency profile data:', err)
-        setError(err.message || 'Failed to load constituency data')
-        setConstituency(null)
-        setAllocationTrend([])
-        setAuditFindings([])
-        setAnomaliesData([])
-      } finally {
-        setLoading(false)
+        return { success: false, error: err.message }
       }
-    }
+    },
+    { cacheTime: 5 * 60 * 1000, immediate: !!slug }
+  )
+  const anomaliesData = (anomaliesResponse?.success && anomaliesResponse.data) || []
 
-    fetchData()
-  }, [slug])
+  // Process allocations data for chart
+  const [allocationTrend, setAllocationTrend] = useState([])
+
+  // Helper to convert slug to proper constituency name for chart keys
+  const slugToChartKey = (slug) => {
+    const map = {
+      'kieni': 'Kieni',
+      'mathira': 'Mathira',
+      'othaya': 'Othaya',
+      'tetu': 'Tetu',
+      'mukurweini': 'Mukurwe-ini',
+      'nyeri_town': 'Nyeri Town',
+    }
+    return map[slug] || slug
+  }
+
+  useEffect(() => {
+    if (allocationsResponse && allocationsResponse.allocations) {
+      // Group allocations by fiscal year and constituency
+      const allocationsByYear = {}
+
+      allocationsResponse.allocations.forEach(alloc => {
+        const fy = alloc.fy_key || alloc.financial_year || 'Unknown'
+        if (!allocationsByYear[fy]) {
+          allocationsByYear[fy] = { fy }
+        }
+
+        const constituencyIdentifier = alloc.constituency_slug ||
+                                     alloc.name ||
+                                     (alloc.entity && alloc.entity.name) ||
+                                     'unknown'
+
+        const amount = alloc.amount_kshm || alloc.amount || alloc.allocated_amount || 0
+
+        if (constituencyIdentifier && constituencyIdentifier !== 'unknown') {
+          const chartKey = slugToChartKey(constituencyIdentifier)
+          allocationsByYear[fy][chartKey] = amount
+        }
+      })
+
+      const trendArray = Object.keys(allocationsByYear)
+        .map(fy => ({
+          fy,
+          ...allocationsByYear[fy]
+        }))
+        .sort((a, b) => {
+          const yearA = parseInt(a.fy.split('/')[0])
+          const yearB = parseInt(b.fy.split('/')[0])
+          return yearA - yearB
+        })
+
+      setAllocationTrend(trendArray)
+    } else {
+      setAllocationTrend([])
+    }
+  }, [allocationsResponse])
+
+  const loading = constLoading || allocLoading || auditLoading || scoreLoading || anomaliesLoading
+  const error = constError
 
   // Download PDF report
   const handleDownloadReport = useCallback(async () => {
@@ -240,17 +175,12 @@ export default function ConstituencyProfile() {
     )
   }
 
-  // Ensure we have at least some allocation trend data for the chart
+  // Use the allocationTrend state (populated from API response in fetchData)
+
   // Determine the constituency key for chart data (matches allocationTrend format)
   const constituencyChartKey = constituency.name === 'Mukurwe-ini' ? 'Mukurwe-ini' : constituency.name
 
-  // Ensure we have at least some allocation trend data for the chart
-  const chartData = allocationTrend.length > 0 ? allocationTrend : [
-    { fy: '2022/23', [constituencyChartKey]: constituency.totalAllocationKshm || 0 },
-    { fy: '2023/24', [constituencyChartKey]: constituency.totalAllocationKshm || 0 },
-    { fy: '2024/25', [constituencyChartKey]: constituency.totalAllocationKshm || 0 },
-    { fy: '2025/26', [constituencyChartKey]: constituency.totalAllocationKshm || 0 }
-  ]
+  const chartData = allocationTrend
 
   // Filter findings and anomalies for this constituency (though they should already be filtered by backend)
   const findings = auditFindings

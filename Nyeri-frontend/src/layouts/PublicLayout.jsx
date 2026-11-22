@@ -35,6 +35,7 @@ const navGroups = [
 function Dropdown({ group, isMobile = false }) {
   const [open, setOpen] = useState(false)
   const dropdownRef = useRef(null)
+  const closeTimeoutRef = useRef(null)
 
   // Close dropdown when clicking outside (desktop only)
   useEffect(() => {
@@ -49,6 +50,26 @@ function Dropdown({ group, isMobile = false }) {
     }
   }, [isMobile])
 
+  const handleMouseEnter = () => {
+    if (!isMobile) {
+      if (closeTimeoutRef.current) {
+        clearTimeout(closeTimeoutRef.current)
+        closeTimeoutRef.current = null
+      }
+      setOpen(true)
+    }
+  }
+
+  const handleMouseLeave = () => {
+    if (!isMobile) {
+      // Add a small delay to prevent dropdown from closing when moving mouse to menu
+      closeTimeoutRef.current = setTimeout(() => {
+        setOpen(false)
+        closeTimeoutRef.current = null
+      }, 150)
+    }
+  }
+
   if (group.isSingle) {
     return (
       <NavLink
@@ -57,8 +78,7 @@ function Dropdown({ group, isMobile = false }) {
         className={({ isActive }) =>
           `px-3 py-2 rounded text-sm font-medium transition-colors ${
             isActive ? 'text-forest-700 bg-forest-50/30' : 'text-white/60 hover:text-white'
-          }`
-        }
+          }`}
       >
         {group.label}
       </NavLink>
@@ -71,8 +91,8 @@ function Dropdown({ group, isMobile = false }) {
     <div
       ref={dropdownRef}
       className="relative"
-      onMouseEnter={() => !isMobile && setOpen(true)}
-      onMouseLeave={() => !isMobile && setOpen(false)}
+      onMouseEnter={handleMouseEnter}
+      onMouseLeave={handleMouseLeave}
     >
       <button
         onClick={() => setOpen(!open)}
@@ -88,7 +108,11 @@ function Dropdown({ group, isMobile = false }) {
       </button>
 
       {open && (
-        <div className={`absolute top-full left-0 min-w-[180px] rounded-lg bg-ink border border-line/50 shadow-lg py-1 z-40 ${isMobile ? 'static w-full bg-ink/50 border-t border-line/50 shadow-none mt-0' : ''}`}>
+        <div
+          className={`absolute top-full left-0 min-w-[180px] rounded-lg bg-ink border border-line/50 shadow-lg py-1 z-40 ${isMobile ? 'static w-full bg-ink/50 border-t border-line/50 shadow-none mt-0' : ''}`}
+          onMouseEnter={handleMouseEnter}
+          onMouseLeave={handleMouseLeave}
+        >
           {group.items.map((item) => (
             <NavLink
               key={item.to}
@@ -97,8 +121,7 @@ function Dropdown({ group, isMobile = false }) {
               className={({ isActive }) =>
                 `block px-4 py-2.5 text-sm transition-colors ${
                   isActive ? 'text-forest-700 bg-forest-50/30' : 'text-white/60 hover:text-white hover:bg-white/5'
-                }${isMobile ? ' rounded-none' : ''}`
-              }
+                }${isMobile ? ' rounded-none' : ''}`}
             >
               {item.label}
             </NavLink>

@@ -1,127 +1,115 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useCallback } from 'react'
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, Tooltip as RTooltip, ResponsiveContainer, CartesianGrid, Legend } from 'recharts'
 import { Card, Badge, Button, Toast } from '../components/ui'
 import { Breadcrumbs, Table } from '../components/DataDisplay'
 import { KpiCard } from '../components/Insights'
 import { FileDown } from 'lucide-react'
 import APIService from '../services/api'
+import { useSharedAsyncData } from '../hooks/useAsyncData.jsx'
 
 
 const SEV_COLORS = { High: '#A6431F', Medium: '#C08A28', Low: '#2E6B44' }
 const CHART_COLORS = ['#14532D', '#A6431F', '#C08A28', '#2E6B44', '#5B6560', '#6E9E7C']
 
 export default function AccountabilityDashboard() {
-  const [constituencies, setConstituencies] = useState([])
-  const [governorData, setGovernorData] = useState(null)
-  const [countyFinances, setCountyFinances] = useState([])
-  const [departments, setDepartments] = useState([])
-  const [countyAuditFindings, setCountyAuditFindings] = useState([])
-  const [anomalies, setAnomalies] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
+  // Fetch data independently with persistent caching
+  const { data: constituencies, isLoading: constLoading, error: constError } = useSharedAsyncData(
+    'accountability-constituencies',
+    () => APIService.getAllConstituencyScores(),
+    { cacheTime: 10 * 60 * 1000 }
+  )
+
+  const { data: governorData, isLoading: govLoading, error: govError } = useSharedAsyncData(
+    'accountability-governor',
+    () => APIService.getGovernorProfile(),
+    { cacheTime: 10 * 60 * 1000 }
+  )
+
+  const { data: countyFinances, isLoading: financeLoading } = useSharedAsyncData(
+    'accountability-finances',
+    () => APIService.getCountyFinances(),
+    { cacheTime: 10 * 60 * 1000 }
+  )
+
+  const { data: departmentsResponse, isLoading: deptLoading } = useSharedAsyncData(
+    'accountability-departments',
+    () => APIService.getDepartmentData(),
+    { cacheTime: 10 * 60 * 1000 }
+  )
+  const departments = departmentsResponse?.departments || departmentsResponse || []
+
+  const { data: auditResponse, isLoading: auditLoading } = useSharedAsyncData(
+    'accountability-audit',
+    () => APIService.getCountyAuditFindings(),
+    { cacheTime: 5 * 60 * 1000 }
+  )
+  const countyAuditFindings = auditResponse?.audit_findings || auditResponse || []
+
+  const { data: findingsClassifierResponse, isLoading: anomaliesLoading } = useSharedAsyncData(
+    'accountability-anomalies',
+    () => APIService.getCountyFindingsClassifier().catch(() => ({ success: false })),
+    { cacheTime: 5 * 60 * 1000 }
+  )
+  const anomalies = (findingsClassifierResponse?.success && findingsClassifierResponse.data?.narrative_fields?.findings) || []
+
+  const loading = constLoading || govLoading || financeLoading || deptLoading || auditLoading || anomaliesLoading
+  const error = constError || govError
+
   const [toast, setToast] = useState(null)
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true)
-        // Fetch all required data in parallel
-        const [
-          constituenciesData,
-          governorResponse,
-          financesResponse,
-          departmentsResponse,
-          auditResponse,
-          findingsClassifierResponse
-        ] = await Promise.all([
-          APIService.getAllConstituencyScores(),
-          APIService.getGovernorProfile(),
-          APIService.getCountyFinances(),
-          APIService.getDepartmentData(),
-          APIService.getCountyAuditFindings(),
-          APIService.getCountyFindingsClassifier().catch(() => ({ success: false }))
-        ])
-
-        setConstituencies(constituenciesData)
-        setGovernorData(governorResponse)
-        setCountyFinances(financesResponse)
-        setDepartments(departmentsResponse)
-        setCountyAuditFindings(auditResponse.audit_findings || auditResponse || [])
-
-        // Parse anomalies from findings classifier response (has severity, category, entity, etc.)
-        if (findingsClassifierResponse && findingsClassifierResponse.success && findingsClassifierResponse.data) {
-          const narrative = findingsClassifierResponse.data.narrative_fields || {}
-          if (narrative.findings && Array.isArray(narrative.findings)) {
-            setAnomalies(narrative.findings)
-          }
-        }
-
-        setError(null)
-      } catch (err) {
-        setError(err.message || 'Failed to load dashboard data')
-      } finally {
-        setLoading(false)
-      }
-    }
-    fetchData()
-  }, [])
-
-  const avgScore = constituencies.length > 0
+  const avgScore = constituencies?.length > 0
     ? Math.round(constituencies.reduce((a, c) => a + (c.accountabilityScore || 0), 0) / constituencies.length)
     : 0
 
-  const totalFlagged = countyAuditFindings.reduce((a, f) => {
+  const totalFlagged = countyAuditFindings?.reduce((a, f) => {
     const amount = f.amount_flagged_kshm || f.amount_at_risk || 0
     const numAmount = typeof amount === 'number' ? amount : (typeof amount === 'string' ? parseFloat(amount) : 0)
     return a + (isNaN(numAmount) ? 0 : numAmount)
-  }, 0)
+  }, 0) || 0
 
   const severityCounts = ['High', 'Medium', 'Low'].map((s) => ({
-    name: s, value: anomalies.filter((a) => a.severity === s).length,
+    name: s, value: anomalies?.filter((a) => a.severity === s).length || 0,
   }))
 
-  const departmentsBelowTarget = departments.filter((d) => d.status !== 'On Track').length
+  const departmentsBelowTarget = departments?.filter((d) => d.status !== 'On Track').length || 0
 
   // Build allocation trend data from county finances (now pivoted by the API)
-  const allocationTrendData = countyFinances.map(f => ({
+  const allocationTrendData = countyFinances?.map(f => ({
     fy: f.financial_year || 'N/A',
     'Equitable Share': f.equitable_share_kshb || 0,
     'Conditional Grants': f.conditional_grants_kshb || 0,
     'Own Source Revenue': f.osr_kshb || 0,
     'Expenditure': f.expenditure_kshb || 0
-  }))
+  })) || []
 
   // Normalize department data for chart - handle both absorption_rate and absorptionRate
-  const normalizedDepartments = departments.map(d => ({
+  const normalizedDepartments = departments?.map(d => ({
     ...d,
     absorption_rate: d.absorption_rate ?? d.absorptionRate ?? 0,
     department: d.department || d.name || 'Unknown'
-  }))
+  })) || []
 
-  // Download governor PDF report
-  const handleDownloadGovernorReport = useCallback(async () => {
-    if (!governorData) return
-
+  // Download county-wide aggregated PDF report (Governor + all Constituencies)
+  const handleDownloadCountyReport = useCallback(async () => {
     try {
-      setToast({ type: 'info', message: 'Generating governor report...' })
-      const blob = await APIService.downloadGovernorPDFReport(governorData.governor || governorData.name)
+      setToast({ type: 'info', message: 'Generating Nyeri County accountability report...' })
+      const blob = await APIService.downloadCountyPDFReport()
 
       const url = window.URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      const leaderName = (governorData.name || 'governor').replace(/\s+/g, '_')
-      a.download = `${leaderName}_accountability_report.pdf`
+      a.download = 'Nyeri_County_Accountability_Report.pdf'
       document.body.appendChild(a)
       a.click()
       window.URL.revokeObjectURL(url)
       document.body.removeChild(a)
 
-      setToast({ type: 'success', message: 'Governor report downloaded successfully!' })
+      setToast({ type: 'success', message: 'County report downloaded successfully!' })
     } catch (err) {
-      console.error('Error downloading governor report:', err)
-      setToast({ type: 'error', message: err.message || 'Failed to generate governor report' })
+      console.error('Error downloading county report:', err)
+      setToast({ type: 'error', message: err.message || 'Failed to generate county report' })
     }
-  }, [governorData])
+  }, [])
 
   if (loading) {
     return (
@@ -147,17 +135,15 @@ export default function AccountabilityDashboard() {
     <div className="max-w-content mx-auto px-4 sm:px-6 py-8">
       <Breadcrumbs items={[{ label: 'Accountability' }]} />
 
-      {/* Header with Governor Report Download */}
+      {/* Header with County Report Download */}
       <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
         <div>
           <h1 className="text-3xl font-semibold mb-1">Accountability dashboard</h1>
           <p className="text-ink-muted mb-6 max-w-2xl">A county-wide view of financial performance, audit findings and AI-detected anomalies.</p>
         </div>
-        {governorData && (
-          <Button onClick={handleDownloadGovernorReport} className="md:ml-auto">
-            <FileDown size={16} /> Download Governor Accountability Report
-          </Button>
-        )}
+        <Button onClick={handleDownloadCountyReport} className="md:ml-auto">
+          <FileDown size={16} /> Download Nyeri County Accountability Report
+        </Button>
       </div>
 
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">

@@ -74,12 +74,16 @@ const normalizeGovernor = (g, i) => ({
 })
 
 const normalizeConstituency = (c, i) => {
+  // Handle mp field that could be string or object { name, party }
   const rawMp = c?.mp ?? c?.mp_name
+  const mpName = typeof rawMp === 'object' ? rawMp?.name : rawMp
+  const mpParty = typeof rawMp === 'object' ? rawMp?.party : undefined
+
   return {
     _key: c?.slug ?? c?.constituency_slug ?? c?.id ?? c?._id ?? `const-${i}`,
     name: c?.name ?? c?.constituency ?? '—',
-    mp: stripParty(rawMp) ?? '—',
-    party: c?.party ?? partyFromName(rawMp) ?? '—',
+    mp: stripParty(mpName) ?? '—',
+    party: c?.party ?? mpParty ?? partyFromName(mpName) ?? '—',
     county: c?.county ?? 'Nyeri',
     auditStatus: c?.auditStatus ?? c?.audit_status ?? 'Qualified',
     score: c?.accountabilityScore ?? c?.accountability_score ?? c?.score ?? null,
@@ -89,8 +93,16 @@ const normalizeConstituency = (c, i) => {
 const normalizeFinancial = (r, i) => ({
   _key: r?.id ?? r?._id ?? `fin-${i}`,
   fy: clean(r?.fy ?? r?.fy_display ?? r?.financial_year ?? r?.financialYear) ?? 'Unknown',
-  budget: r?.budget ?? r?.amountKshb ?? r?.budget_kshb ?? null,
-  expenditure: r?.expenditure ?? r?.exp ?? r?.expenditure_kshb ?? null,
+  // Handle pivoted format from /governor/finances
+  budget: r?.budget ?? r?.amountKshb ?? r?.budget_kshb ??
+          (r?.equitable_share_kshb ? r.equitable_share_kshb + (r.conditional_grants_kshb || 0) + (r.osr_kshb || 0) : null),
+  expenditure: r?.expenditure ?? r?.exp ?? r?.expenditure_kshb ?? r?.total_expenditure_kshb ?? null,
+  // Also include pivoted fields for display
+  equitableShare: r?.equitable_share_kshb ?? null,
+  conditionalGrants: r?.conditional_grants_kshb ?? null,
+  osr: r?.osr_kshb ?? null,
+  development: r?.development_kshb ?? null,
+  recurrent: r?.recurrent_kshb ?? null,
 })
 
 const normalizeAudit = (r, i) => ({
@@ -115,16 +127,31 @@ const normalizeDepartment = (r, i) => ({
 // wide (one row per FY). Normalize both into { fy, values: { [constituency]: amount } }.
 const META_KEYS = new Set(['_id', 'id', 'fy', 'fy_key', 'fy_display', 'financial_year', 'financialYear'])
 
+// Helper to convert slug to proper constituency name for chart keys
+const slugToChartKey = (slug) => {
+  const map = {
+    'kieni': 'Kieni',
+    'mathira': 'Mathira',
+    'othaya': 'Othaya',
+    'tetu': 'Tetu',
+    'mukurweini': 'Mukurwe-ini',
+    'nyeri_town': 'Nyeri Town',
+  }
+  return map[slug] || slug
+}
+
 const normalizeAllocations = (rows) => {
   const isFlat = rows.some(
-    (r) => (r?.constituency ?? r?.constituency_name) != null && (r?.amount_kshm ?? r?.amountKshm) != null
+    (r) => (r?.constituency ?? r?.constituency_name ?? r?.constituency_slug) != null && (r?.amount_kshm ?? r?.amountKshm) != null
   )
 
   if (isFlat) {
     const byFy = new Map()
     rows.forEach((r) => {
       const fy = clean(r?.fy_display ?? r?.fy ?? r?.financial_year ?? r?.fy_key) ?? 'Unknown'
-      const name = clean(r?.constituency ?? r?.constituency_name) ?? 'Unknown'
+      // Handle both slug and name
+      const rawName = clean(r?.constituency ?? r?.constituency_name ?? r?.constituency_slug) ?? 'Unknown'
+      const name = slugToChartKey(rawName)
       const amount = r?.amount_kshm ?? r?.amountKshm
       if (!byFy.has(fy)) byFy.set(fy, { _key: fy, fy, values: {} })
       byFy.get(fy).values[name] = amount
@@ -197,9 +224,11 @@ function AdminDataManagementInner({ entity }) {
         let rows = []
 
         if (entity === 'leaders') {
-          const [govResult, constResult] = await Promise.allSettled([
+          // Fetch governor and constituencies first
+          const [govResult, constResult, govScoreResult] = await Promise.allSettled([
             getJson('/governor/'),
             getJson('/constituency/'),
+            getJson('/governor/score'),
           ])
 
           if (govResult.status === 'rejected' && constResult.status === 'rejected') {
@@ -209,37 +238,74 @@ function AdminDataManagementInner({ entity }) {
           const failed = []
 
           let governors = []
+          let governorScore = null
           if (govResult.status === 'fulfilled') {
             const v = govResult.value
-            governors = toArray(v, 'governors', 'governor')
-            // A single-governor endpoint may return one object instead of a list
-            if (governors.length === 0 && v && typeof v === 'object' && !Array.isArray(v) && Object.keys(v).length) {
-              governors = [v]
+            const govData = v?.data ?? v
+            governors = toArray(govData, 'governors', 'governor')
+            if (governors.length === 0 && govData && typeof govData === 'object' && !Array.isArray(govData) && Object.keys(govData).length) {
+              governors = [govData]
             }
           } else {
             failed.push('governor')
           }
 
+          // Fetch governor score
+          if (govScoreResult.status === 'fulfilled') {
+            const v = govScoreResult.value
+            const scoreData = v?.data ?? v
+            governorScore = scoreData?.score ?? null
+          }
+
           let constituencies = []
           if (constResult.status === 'fulfilled') {
-            constituencies = toArray(constResult.value, 'constituencies')
+            const v = constResult.value
+            const constData = v?.data ?? v
+            constituencies = toArray(constData, 'constituencies', 'data', 'results') || []
+            if (constituencies.length === 0 && Array.isArray(constData)) {
+              constituencies = constData
+            }
           } else {
             failed.push('constituencies')
           }
 
           if (failed.length) setWarning(`Could not load: ${failed.join(', ')}.`)
 
+          // Fetch MP scores in parallel for each constituency
+          const constituencyScores = {}
+          if (constituencies.length > 0) {
+            const scorePromises = constituencies
+              .filter(c => c?.slug)
+              .map(c => getJson(`/constituency/${c.slug}/score`)
+                .then(res => ({ slug: c.slug, score: (res?.data ?? res)?.score }))
+                .catch(() => ({ slug: c.slug, score: null }))
+              )
+            const scoreResults = await Promise.all(scorePromises)
+            scoreResults.forEach(r => {
+              if (r.slug && r.score != null) {
+                constituencyScores[r.slug] = r.score
+              }
+            })
+          }
+
           rows = [
-            ...governors.map(normalizeGovernor),
+            ...governors.map((g, i) => {
+              const n = normalizeGovernor(g, i)
+              return {
+                ...n,
+                score: governorScore ?? n.score,
+              }
+            }),
             ...constituencies.map((c, i) => {
               const n = normalizeConstituency(c, i)
+              const fetchedScore = constituencyScores[c?.slug] ?? n.score
               return {
                 _key: `mp-${n._key}`,
                 name: n.mp,
                 position: 'MP',
                 party: n.party,
                 place: n.name,
-                score: n.score,
+                score: fetchedScore,
               }
             }),
           ]
@@ -254,7 +320,9 @@ function AdminDataManagementInner({ entity }) {
               rows = toArray(raw, 'finances', 'financial_data', 'years').map(normalizeFinancial)
               break
             case 'allocations':
-              rows = normalizeAllocations(toArray(raw, 'allocations'))
+              // API returns { allocations: [...], pagination: {...} } or direct array
+              const allocData = toArray(raw, 'allocations') || (Array.isArray(raw) ? raw : [])
+              rows = normalizeAllocations(allocData)
               break
             case 'audit':
               rows = toArray(raw, 'audit_findings', 'findings').map(normalizeAudit)
@@ -389,7 +457,7 @@ function getColumnsForEntity(entity, allocationCols) {
     case 'constituencies':
       return ['Name', 'MP', 'County', 'Audit status', 'Score', 'Actions']
     case 'financial':
-      return ['Financial Year', 'Budget (KShB)', 'Expenditure (KShB)', 'Actions']
+      return ['Financial Year', 'Equitable Share (KShB)', 'Cond. Grants (KShB)', 'OSR (KShB)', 'Expenditure (KShB)', 'Development (KShB)', 'Recurrent (KShB)', 'Actions']
     case 'allocations':
       return ['Financial Year', ...allocationCols.map((c) => `${c} (KShM)`), 'Actions']
     case 'audit':
@@ -438,8 +506,12 @@ function renderCells(entity, row, allocationCols) {
       return (
         <>
           <td className="py-3 pr-4 font-medium text-ink">{row.fy}</td>
-          <td className="py-3 pr-4 text-ink-muted">{fmtNum(row.budget)}</td>
+          <td className="py-3 pr-4 text-ink-muted">{fmtNum(row.equitableShare)}</td>
+          <td className="py-3 pr-4 text-ink-muted">{fmtNum(row.conditionalGrants)}</td>
+          <td className="py-3 pr-4 text-ink-muted">{fmtNum(row.osr)}</td>
           <td className="py-3 pr-4 text-ink-muted">{fmtNum(row.expenditure)}</td>
+          <td className="py-3 pr-4 text-ink-muted">{fmtNum(row.development)}</td>
+          <td className="py-3 pr-4 text-ink-muted">{fmtNum(row.recurrent)}</td>
         </>
       )
     case 'allocations':

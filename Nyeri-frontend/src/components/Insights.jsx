@@ -1,6 +1,11 @@
 import { TrendingUp, TrendingDown, ShieldAlert, Sparkles, FileText, Quote } from 'lucide-react'
 import { Card, Badge } from './ui'
-import { scoreCategory } from '../data/mockData'
+
+function scoreCategory(score) {
+  if (score >= 75) return { label: 'Strong', tone: 'good' }
+  if (score >= 55) return { label: 'Moderate', tone: 'watch' }
+  return { label: 'Needs Attention', tone: 'risk' }
+}
 
 export function KpiCard({ label, value, change, changeTone = 'neutral', sub }) {
   return (
