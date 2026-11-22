@@ -240,11 +240,12 @@ export default function ConstituencyProfile() {
     )
   }
 
-  // Use the chartData built from API response (see fetchData function above)
-  // The chartData variable is already set in the fetchData function based on allocationsResponse
+  // Use the allocationTrend state (populated from API response in fetchData)
 
   // Determine the constituency key for chart data (matches allocationTrend format)
   const constituencyChartKey = constituency.name === 'Mukurwe-ini' ? 'Mukurwe-ini' : constituency.name
+
+  const chartData = allocationTrend
 
   // Filter findings and anomalies for this constituency (though they should already be filtered by backend)
   const findings = auditFindings
