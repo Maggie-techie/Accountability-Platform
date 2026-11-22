@@ -11,50 +11,50 @@ import { useSharedAsyncData } from '../hooks/useAsyncData.jsx'
 const SEV_COLORS = { High: '#A6431F', Medium: '#C08A28', Low: '#2E6B44' }
 const CHART_COLORS = ['#14532D', '#A6431F', '#C08A28', '#2E6B44', '#5B6560', '#6E9E7C']
 
-// Fetch data independently with persistent caching
-const { data: constituencies, isLoading: constLoading, error: constError } = useSharedAsyncData(
-  'accountability-constituencies',
-  () => APIService.getAllConstituencyScores(),
-  { cacheTime: 10 * 60 * 1000 }
-)
-
-const { data: governorData, isLoading: govLoading, error: govError } = useSharedAsyncData(
-  'accountability-governor',
-  () => APIService.getGovernorProfile(),
-  { cacheTime: 10 * 60 * 1000 }
-)
-
-const { data: countyFinances, isLoading: financeLoading } = useSharedAsyncData(
-  'accountability-finances',
-  () => APIService.getCountyFinances(),
-  { cacheTime: 10 * 60 * 1000 }
-)
-
-const { data: departmentsResponse, isLoading: deptLoading } = useSharedAsyncData(
-  'accountability-departments',
-  () => APIService.getDepartmentData(),
-  { cacheTime: 10 * 60 * 1000 }
-)
-const departments = departmentsResponse?.departments || departmentsResponse || []
-
-const { data: auditResponse, isLoading: auditLoading } = useSharedAsyncData(
-  'accountability-audit',
-  () => APIService.getCountyAuditFindings(),
-  { cacheTime: 5 * 60 * 1000 }
-)
-const countyAuditFindings = auditResponse?.audit_findings || auditResponse || []
-
-const { data: findingsClassifierResponse, isLoading: anomaliesLoading } = useSharedAsyncData(
-  'accountability-anomalies',
-  () => APIService.getCountyFindingsClassifier().catch(() => ({ success: false })),
-  { cacheTime: 5 * 60 * 1000 }
-)
-const anomalies = (findingsClassifierResponse?.success && findingsClassifierResponse.data?.narrative_fields?.findings) || []
-
-const loading = constLoading || govLoading || financeLoading || deptLoading || auditLoading || anomaliesLoading
-const error = constError || govError
-
 export default function AccountabilityDashboard() {
+  // Fetch data independently with persistent caching
+  const { data: constituencies, isLoading: constLoading, error: constError } = useSharedAsyncData(
+    'accountability-constituencies',
+    () => APIService.getAllConstituencyScores(),
+    { cacheTime: 10 * 60 * 1000 }
+  )
+
+  const { data: governorData, isLoading: govLoading, error: govError } = useSharedAsyncData(
+    'accountability-governor',
+    () => APIService.getGovernorProfile(),
+    { cacheTime: 10 * 60 * 1000 }
+  )
+
+  const { data: countyFinances, isLoading: financeLoading } = useSharedAsyncData(
+    'accountability-finances',
+    () => APIService.getCountyFinances(),
+    { cacheTime: 10 * 60 * 1000 }
+  )
+
+  const { data: departmentsResponse, isLoading: deptLoading } = useSharedAsyncData(
+    'accountability-departments',
+    () => APIService.getDepartmentData(),
+    { cacheTime: 10 * 60 * 1000 }
+  )
+  const departments = departmentsResponse?.departments || departmentsResponse || []
+
+  const { data: auditResponse, isLoading: auditLoading } = useSharedAsyncData(
+    'accountability-audit',
+    () => APIService.getCountyAuditFindings(),
+    { cacheTime: 5 * 60 * 1000 }
+  )
+  const countyAuditFindings = auditResponse?.audit_findings || auditResponse || []
+
+  const { data: findingsClassifierResponse, isLoading: anomaliesLoading } = useSharedAsyncData(
+    'accountability-anomalies',
+    () => APIService.getCountyFindingsClassifier().catch(() => ({ success: false })),
+    { cacheTime: 5 * 60 * 1000 }
+  )
+  const anomalies = (findingsClassifierResponse?.success && findingsClassifierResponse.data?.narrative_fields?.findings) || []
+
+  const loading = constLoading || govLoading || financeLoading || deptLoading || auditLoading || anomaliesLoading
+  const error = constError || govError
+
   const [toast, setToast] = useState(null)
 
   const avgScore = constituencies?.length > 0
