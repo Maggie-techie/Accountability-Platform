@@ -132,49 +132,6 @@ export function useSharedAsyncData(key, fetcher, options = {}) {
   return useAsyncData(key, fetcher, { ...options, persistent: true })
 }
 
-export function useSharedAsyncData(key, fetcher, options = {}) {
-  const { cacheTime = 5 * 60 * 1000 } = options
-  const [data, setData] = useState(null)
-  const [error, setError] = useState(null)
-  const [isLoading, setIsLoading] = useState(true)
-
-  useEffect(() => {
-    let mounted = true
-
-    const load = async () => {
-      // Check global cache
-      const cached = globalCache.get(key)
-      if (cached && Date.now() - cached.timestamp < cacheTime) {
-        if (mounted) {
-          setData(cached.data)
-          setIsLoading(false)
-        }
-        return
-      }
-
-      try {
-        const result = await fetcher()
-        if (mounted) {
-          globalCache.set(key, { data: result, timestamp: Date.now() })
-          setData(result)
-          setError(null)
-        }
-      } catch (err) {
-        if (mounted) {
-          setError(err)
-        }
-      } finally {
-        if (mounted) setIsLoading(false)
-      }
-    }
-
-    load()
-    return () => { mounted = false }
-  }, [key, fetcher, cacheTime])
-
-  return { data, error, isLoading }
-}
-
 /**
  * Skeleton component for consistent loading states
  */
