@@ -6,7 +6,7 @@ import { Breadcrumbs, Pagination, usePagination } from '../components/DataDispla
 import { EmptyState } from '../components/ui'
 import { LEADER_PHOTOS } from '../utils/leaderPhotos'
 import APIService from '../services/api'
-import { useAsyncData, Skeleton, AsyncContent } from '../hooks/useAsyncData.jsx'
+import { useSharedAsyncData, Skeleton, AsyncContent } from '../hooks/useAsyncData.jsx'
 
 function scoreCategory(score) {
   if (score >= 75) return { label: 'Strong', tone: 'good' }
@@ -21,19 +21,19 @@ export default function Leaders() {
   const [place, setPlace] = useState('')
 
   // Fetch data independently
-  const { data: governorData, isLoading: govLoading, error: govError, refresh: refreshGov } = useAsyncData(
+  const { data: governorData, isLoading: govLoading, error: govError, refresh: refreshGov } = useSharedAsyncData(
     'governor-profile',
     () => APIService.getGovernorProfile(),
     { cacheTime: 10 * 60 * 1000 }
   )
-  const { data: governorScoreData, isLoading: govScoreLoading } = useAsyncData(
+  const { data: governorScoreData, isLoading: govScoreLoading } = useSharedAsyncData(
     'governor-score',
     () => APIService.getGovernorScore(),
     { cacheTime: 10 * 60 * 1000 }
   )
   const governorScore = governorScoreData?.score
 
-  const { data: constituenciesWithScores, isLoading: constLoading, error: constError, refresh: refreshConst } = useAsyncData(
+  const { data: constituenciesWithScores, isLoading: constLoading, error: constError, refresh: refreshConst } = useSharedAsyncData(
     'all-constituency-scores',
     () => APIService.getAllConstituencyScores(),
     { cacheTime: 10 * 60 * 1000 }

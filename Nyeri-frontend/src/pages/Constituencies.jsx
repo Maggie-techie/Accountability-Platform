@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import { Card, Badge, EmptyState } from '../components/ui'
 import { Breadcrumbs } from '../components/DataDisplay'
 import APIService from '../services/api'
-import { useAsyncData, Skeleton, AsyncContent } from '../hooks/useAsyncData.jsx'
+import { useSharedAsyncData, Skeleton, AsyncContent } from '../hooks/useAsyncData.jsx'
 
 function scoreCategory(score) {
   if (score >= 75) return { label: 'Strong', tone: 'good' }
@@ -12,7 +12,7 @@ function scoreCategory(score) {
 }
 
 export default function Constituencies() {
-  const { data: constituenciesData, isLoading, error, refresh } = useAsyncData(
+  const { data: constituenciesData, isLoading, error, refresh } = useSharedAsyncData(
     'all-constituency-scores',
     () => APIService.getAllConstituencyScores(),
     { cacheTime: 10 * 60 * 1000 }

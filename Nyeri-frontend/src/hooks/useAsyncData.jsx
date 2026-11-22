@@ -1,10 +1,16 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 
 /**
+ * Global cache for sharing data across components and persisting across mounts
+ * This is a module-level Map that survives component unmount/remount cycles
+ */
+export const globalCache = new Map()
+
+/**
  * Custom hook for async data fetching with:
  * - Immediate skeleton rendering (no blocking)
  * - Automatic deduplication (same key = same promise)
- * - Optional caching with TTL
+ * - Persistent caching with TTL (survives page navigation)
  * - Retry on error
  */
 export function useAsyncData(key, fetcher, options = {}) {
@@ -15,6 +21,7 @@ export function useAsyncData(key, fetcher, options = {}) {
     retryDelay = 1000,
     onSuccess,
     onError,
+    persistent = true, // When true, uses globalCache to persist across mounts
   } = options
 
   const [data, setData] = useState(null)
@@ -22,6 +29,7 @@ export function useAsyncData(key, fetcher, options = {}) {
   const [isLoading, setIsLoading] = useState(immediate)
   const [isRefreshing, setIsRefreshing] = useState(false)
 
+  // Per-instance cache for deduplication within same mount
   const cacheRef = useRef(new Map())
   const abortRef = useRef(null)
   const mountedRef = useRef(true)
@@ -37,10 +45,13 @@ export function useAsyncData(key, fetcher, options = {}) {
     }
   }, [])
 
+  const getCache = useCallback(() => persistent ? globalCache : cacheRef.current, [persistent])
+
   const execute = useCallback(async (isRetry = false) => {
     if (!isRetry) {
-      // Check cache first
-      const cached = cacheRef.current.get(key)
+      // Check cache first (global or local)
+      const cache = getCache()
+      const cached = cache.get(key)
       if (cached && Date.now() - cached.timestamp < cacheTime) {
         setData(cached.data)
         setIsLoading(false)
@@ -65,8 +76,9 @@ export function useAsyncData(key, fetcher, options = {}) {
         if (!mountedRef.current) return null
         if (controller.signal.aborted) return null
 
-        // Cache successful result
-        cacheRef.current.set(key, { data: result, timestamp: Date.now() })
+        // Cache successful result (global or local)
+        const cache = getCache()
+        cache.set(key, { data: result, timestamp: Date.now() })
 
         setData(result)
         setError(null)
@@ -89,7 +101,7 @@ export function useAsyncData(key, fetcher, options = {}) {
         else setIsRefreshing(false)
       }
     }
-  }, [key, cacheTime, retry, retryDelay, onSuccess, onError])
+  }, [key, cacheTime, retry, retryDelay, onSuccess, onError, getCache])
 
   // Initial fetch
   useEffect(() => {
@@ -99,7 +111,7 @@ export function useAsyncData(key, fetcher, options = {}) {
   }, [immediate, execute])
 
   const refresh = useCallback(() => execute(true), [execute])
-  const clearCache = useCallback(() => cacheRef.current.delete(key), [key])
+  const clearCache = useCallback(() => getCache().delete(key), [key, getCache])
 
   return {
     data,
@@ -113,9 +125,12 @@ export function useAsyncData(key, fetcher, options = {}) {
 }
 
 /**
- * Global cache for sharing data across components
+ * Shared async data hook - alias for useAsyncData with persistent=true
+ * Use this when you want data to persist across component mounts/page navigations
  */
-export const globalCache = new Map()
+export function useSharedAsyncData(key, fetcher, options = {}) {
+  return useAsyncData(key, fetcher, { ...options, persistent: true })
+}
 
 export function useSharedAsyncData(key, fetcher, options = {}) {
   const { cacheTime = 5 * 60 * 1000 } = options

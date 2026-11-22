@@ -6,30 +6,30 @@ import { Breadcrumbs, Table } from '../components/DataDisplay'
 import { KpiCard } from '../components/Insights'
 import { LEADER_PHOTOS } from '../utils/leaderPhotos'
 import APIService from '../services/api'
-import { useAsyncData, Skeleton, AsyncContent } from '../hooks/useAsyncData.jsx'
+import { useSharedAsyncData, Skeleton, AsyncContent } from '../hooks/useAsyncData.jsx'
 
 export default function CountyDashboard() {
   // Fetch data independently - each renders as it arrives
-  const { data: governor, isLoading: govLoading, error: govError, refresh: refreshGov } = useAsyncData(
+  const { data: governor, isLoading: govLoading, error: govError, refresh: refreshGov } = useSharedAsyncData(
     'governor-profile',
     () => APIService.getGovernorProfile(),
     { cacheTime: 10 * 60 * 1000 }
   )
 
-  const { data: countyFinances, isLoading: financeLoading, refresh: refreshFinance } = useAsyncData(
+  const { data: countyFinances, isLoading: financeLoading, refresh: refreshFinance } = useSharedAsyncData(
     'county-finances',
     () => APIService.getCountyFinances(),
     { cacheTime: 10 * 60 * 1000 }
   )
 
-  const { data: departmentsResponse, isLoading: deptLoading, refresh: refreshDept } = useAsyncData(
+  const { data: departmentsResponse, isLoading: deptLoading, refresh: refreshDept } = useSharedAsyncData(
     'department-data',
     () => APIService.getDepartmentData(),
     { cacheTime: 10 * 60 * 1000 }
   )
   const departments = departmentsResponse?.departments || departmentsResponse || []
 
-  const { data: auditResponse, isLoading: auditLoading, refresh: refreshAudit } = useAsyncData(
+  const { data: auditResponse, isLoading: auditLoading, refresh: refreshAudit } = useSharedAsyncData(
     'county-audit-findings',
     () => APIService.getCountyAuditFindings(),
     { cacheTime: 5 * 60 * 1000 }

@@ -4,47 +4,32 @@ import { Card, Button, Toast } from '../components/ui'
 import { SearchBar, Select, FilterBar } from '../components/Filters'
 import { Breadcrumbs, Pagination, usePagination } from '../components/DataDisplay'
 import APIService from '../services/api'
+import { useSharedAsyncData } from '../hooks/useAsyncData.jsx'
 
 
 export default function Reports() {
   const [q, setQ] = useState('')
   const [category, setCategory] = useState('')
   const [fy, setFy] = useState('')
-
-  // State for fetched reports
-  const [reportsList, setReportsList] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
   const [toast, setToast] = useState(null)
 
-  // Fetch reports from backend
-  useEffect(() => {
-    const fetchReports = async () => {
-      try {
-        setLoading(true)
-        const response = await fetch(`${APIService.baseURL}/reports/`)
-        if (response.ok) {
-          const data = await response.json()
-          // The API returns the list directly, not wrapped in {reports: [...]}
-          const reports = Array.isArray(data) ? data : (data.reports || data.data || [])
-          setReportsList(reports)
-          setError(null)
-        } else {
-          console.warn('Failed to fetch reports from API:', response.status)
-          setError('Failed to load reports')
-          setReportsList([])
-        }
-      } catch (err) {
-        console.error('Error fetching reports:', err)
-        setError('Failed to load reports')
-        setReportsList([])
-      } finally {
-        setLoading(false)
+  // Fetch reports from backend with persistent caching
+  const { data: reportsData, isLoading: loading, error } = useSharedAsyncData(
+    'reports-list',
+    async () => {
+      const response = await fetch(`${APIService.baseURL}/reports/`)
+      if (response.ok) {
+        const data = await response.json()
+        // The API returns the list directly, not wrapped in {reports: [...]}
+        return Array.isArray(data) ? data : (data.reports || data.data || [])
+      } else {
+        console.warn('Failed to fetch reports from API:', response.status)
+        throw new Error('Failed to load reports')
       }
-    }
-
-    fetchReports()
-  }, [])
+    },
+    { cacheTime: 5 * 60 * 1000 }
+  )
+  const reportsList = reportsData || []
 
   const filtered = useMemo(() => reportsList.filter((r) =>
     (!q || r.title.toLowerCase().includes(q.toLowerCase())) &&

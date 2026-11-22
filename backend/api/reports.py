@@ -1163,6 +1163,475 @@ def generate_financial_summary_report():
         return jsonify({"error": "Failed to generate financial summary report", "details": str(e)}), 500
 
 
+def build_county_report_story(db, styles):
+    """Build the PDF story (content) for the county-wide aggregated report."""
+    story = []
+
+    # Get governor profile
+    governor = db.county_leaders.find_one({})
+    if not governor:
+        return None
+
+    # Get all constituencies with their MPs
+    constituencies = list(db.constituencies.find({}))
+    all_constituency_data = []
+    for c in constituencies:
+        mp = db.mps.find_one({"constituency_slug": c.get("slug")})
+        allocations = list(db.allocations.find({"constituency_slug": c.get("slug")}))
+        audit = list(db.audit_findings.find({"constituency_slug": c.get("slug")}))
+        all_constituency_data.append({
+            "constituency": c,
+            "mp": mp,
+            "allocations": allocations,
+            "audit": audit
+        })
+
+    # Get county finances and audit
+    finances = list(db.county_finances.find({}))
+    county_audit = list(db.county_audit_findings.find({}))
+    departments = list(db.department_absorption.find({}))
+
+    # Calculate governor score
+    absorption_rates = [d.get("absorption_rate", 0) for d in departments]
+    avg_absorption = sum(absorption_rates) / len(absorption_rates) if absorption_rates else 0
+
+    total_flagged_kshm = sum(
+        a.get("amount_flagged_kshm", 0)
+        for a in county_audit
+        if a.get("finding_type") == "misappropriation"
+    )
+    total_revenue_kshm = sum(f.get("amount_kshb", 0) for f in finances) * 1000
+    flagged_ratio = (total_flagged_kshm / total_revenue_kshm) if total_revenue_kshm else 0
+    audit_score = max(0, 100 - (flagged_ratio * 100))
+    governor_score = round((0.6 * avg_absorption) + (0.4 * audit_score), 1)
+
+    # Calculate constituency scores
+    for cd in all_constituency_data:
+        audit_findings = cd["audit"]
+        total_findings = len(audit_findings)
+        correct_findings = sum(1 for a in audit_findings if a.get("finding_type") == "correct_appropriation")
+        misappropriation_findings_count = sum(1 for a in audit_findings if a.get("finding_type") == "misappropriation")
+
+        if total_findings > 0:
+            utilization_ratio = correct_findings / total_findings
+            utilization_score = utilization_ratio * 100
+        else:
+            utilization_score = 50
+
+        total_amount_at_risk = 0
+        for a in audit_findings:
+            if a.get("finding_type") == "misappropriation":
+                amount = a.get("amount_at_risk", 0)
+                if isinstance(amount, str):
+                    import re
+                    num_match = re.search(r'[\d,]+\.?\d*', amount.replace(',', ''))
+                    if num_match:
+                        amount = float(num_match.group())
+                    else:
+                        amount = 0
+                total_amount_at_risk += amount
+
+        if misappropriation_findings_count > 0:
+            audit_score = max(0, 100 - (total_amount_at_risk / 100 * 100))
+        else:
+            audit_score = 100
+
+        opinion_scores = {"Unqualified": 90, "Unqualified*": 85, "Qualified": 60, "Adverse": 30, "Disclaimer": 20}
+        status_scores = {"Clean": 90, "Concerning": 40, "Unknown": 50}
+        mp = cd.get("mp")
+        oag_opinion = mp.get("oag_opinion", "") if mp else ""
+        audit_status = mp.get("audit_status", "") if mp else ""
+        opinion_score = opinion_scores.get(oag_opinion, 50)
+        status_score = status_scores.get(audit_status, 50)
+        oag_score = (opinion_score + status_score) / 2
+
+        score = round((0.3 * utilization_score) + (0.4 * audit_score) + (0.3 * oag_score), 1)
+        cd["score"] = score
+        cd["total_allocation"] = sum(a.get("amount_kshm", 0) for a in cd["allocations"])
+        cd["misappropriation_count"] = misappropriation_findings_count
+        cd["correct_count"] = correct_findings
+        cd["total_amount_at_risk"] = total_amount_at_risk
+
+    # Calculate county-wide average constituency score
+    avg_constituency_score = round(sum(cd["score"] for cd in all_constituency_data) / len(all_constituency_data), 1) if all_constituency_data else 0
+
+    # Overall county score (weighted average)
+    overall_county_score = round((0.4 * governor_score) + (0.6 * avg_constituency_score), 1)
+
+    # Title page
+    story.append(Spacer(1, 1.5*inch))
+    story.append(Paragraph("ACCOUNTABILITY REPORT", styles['ReportTitle']))
+    story.append(Spacer(1, 0.2*inch))
+    story.append(Paragraph("Nyeri County — Aggregated Accountability Assessment", styles['ReportSubtitle']))
+    story.append(Spacer(1, 0.1*inch))
+    story.append(Paragraph(f"Governor: {governor.get('name', 'N/A')} & All Constituency MPs", styles['ReportSubtitle']))
+    story.append(Spacer(1, 0.5*inch))
+    story.append(Paragraph(f"Financial Year: 2024/25", styles['ReportSubtitle']))
+    story.append(Paragraph(f"Generated: {datetime.now().strftime('%B %d, %Y')}", styles['ReportSubtitle']))
+    story.append(Spacer(1, 0.5*inch))
+
+    # Overall score badge
+    score_table = create_score_badge(overall_county_score, styles)
+    story.append(score_table)
+    story.append(Spacer(1, 0.3*inch))
+
+    # Executive Summary
+    story.append(PageBreak())
+    story.append(Paragraph("1. EXECUTIVE SUMMARY", styles['SectionHeading']))
+
+    total_county_revenue = sum(f.get("amount_kshb", 0) for f in finances)
+    total_development = sum(f.get("development_kshb", 0) for f in finances)
+    total_recurrent = sum(f.get("recurrent_kshb", 0) for f in finances)
+    total_ngcdf_allocation = sum(cd["total_allocation"] for cd in all_constituency_data)
+    total_county_audit = len(county_audit)
+    total_constituency_audit = sum(len(cd["audit"]) for cd in all_constituency_data)
+    total_misappropriation = sum(cd["misappropriation_count"] for cd in all_constituency_data)
+    total_amount_at_risk = sum(cd["total_amount_at_risk"] for cd in all_constituency_data) + total_flagged_kshm
+
+    summary_text = (
+        f"This report provides a comprehensive aggregated accountability assessment of "
+        f"<b>Nyeri County</b> for the 2024/25 financial year. It combines the accountability "
+        f"performance of the County Governor, <b>{governor.get('name', 'N/A')}</b>, "
+        f"with all <b>{len(constituencies)} constituencies</b> and their respective Members of Parliament. "
+        f"The overall county accountability score is <b>{overall_county_score}/100</b>, "
+        f"derived from the Governor's score ({governor_score}/100, weight 40%) and the "
+        f"average constituency score ({avg_constituency_score}/100, weight 60%). "
+        f"The assessment reflects {'strong' if overall_county_score >= 75 else 'moderate' if overall_county_score >= 55 else 'concerning'} "
+        f"performance across financial management, audit outcomes, and service delivery."
+    )
+    story.append(Paragraph(summary_text, styles['ReportBody']))
+
+    # Key metrics table
+    story.append(Paragraph("County-Wide Key Metrics at a Glance", styles['SubsectionHeading']))
+
+    metrics_data = [
+        ['Metric', 'Value'],
+        ['Overall County Score', f"{overall_county_score}/100"],
+        ['Governor Score', f"{governor_score}/100"],
+        ['Avg. Constituency Score', f"{avg_constituency_score}/100"],
+        ['Total County Revenue (FY24/25)', f"KSh {total_county_revenue:.2f}B"],
+        ['Development Expenditure', f"KSh {total_development:.2f}B"],
+        ['Recurrent Expenditure', f"KSh {total_recurrent:.2f}B"],
+        ['Total NG-CDF Allocation (All Constituencies)', f"KSh {total_ngcdf_allocation:,.1f}M"],
+        ['County Audit Findings (Total)', str(total_county_audit)],
+        ['Constituency Audit Findings (Total)', str(total_constituency_audit)],
+        ['Total Misappropriation Findings', str(total_misappropriation)],
+        ['Total Amount at Risk', f"KSh {total_amount_at_risk:,.1f}M"],
+    ]
+
+    metrics_table = Table(metrics_data, colWidths=[3*inch, 3*inch])
+    metrics_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), REPORT_COLORS['table_header']),
+        ('TEXTCOLOR', (0, 0), (-1, 0), white),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('GRID', (0, 0), (-1, -1), 0.5, REPORT_COLORS['muted_text']),
+        ('TOPPADDING', (0, 0), (-1, -1), 5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [white, REPORT_COLORS['table_row_alt']]),
+    ]))
+    story.append(metrics_table)
+    story.append(Spacer(1, 0.3*inch))
+
+    # Governor Section
+    story.append(Paragraph("2. COUNTY GOVERNOR ACCOUNTABILITY", styles['SectionHeading']))
+
+    gov_profile = governor
+    story.append(Paragraph(f"<b>Name:</b> {gov_profile.get('name', 'N/A')}", styles['ReportBody']))
+    story.append(Paragraph(f"<b>Party:</b> {gov_profile.get('party', 'N/A')} | <b>Tenure:</b> {gov_profile.get('tenure', 'N/A')}", styles['ReportBody']))
+    story.append(Paragraph(f"<b>Accountability Score:</b> {governor_score}/100", styles['ReportBody']))
+    story.append(Spacer(1, 0.1*inch))
+
+    # Governor metrics
+    gov_metrics = [
+        ['Metric', 'Value'],
+        ['Accountability Score', f"{governor_score}/100"],
+        ['Avg. Dept. Absorption', f"{avg_absorption:.1f}%"],
+        ['Total Revenue (FY24/25)', f"KSh {total_county_revenue:.2f}B"],
+        ['Development Expenditure', f"KSh {total_development:.2f}B"],
+        ['Recurrent Expenditure', f"KSh {total_recurrent:.2f}B"],
+        ['County Audit Findings (Total)', str(total_county_audit)],
+        ['Misappropriation Findings', str(sum(1 for a in county_audit if a.get('finding_type') == 'misappropriation'))],
+        ['Amount Flagged', f"KSh {total_flagged_kshm:,.1f}M"],
+    ]
+
+    gov_table = Table(gov_metrics, colWidths=[2.5*inch, 2.5*inch])
+    gov_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), REPORT_COLORS['table_header']),
+        ('TEXTCOLOR', (0, 0), (-1, 0), white),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 9),
+        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+        ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('GRID', (0, 0), (-1, -1), 0.5, REPORT_COLORS['muted_text']),
+        ('TOPPADDING', (0, 0), (-1, -1), 5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [white, REPORT_COLORS['table_row_alt']]),
+    ]))
+    story.append(gov_table)
+    story.append(Spacer(1, 0.2*inch))
+
+    # Department Absorption
+    story.append(Paragraph("Departmental Budget Absorption", styles['SubsectionHeading']))
+
+    if departments:
+        dept_data = [['Department', 'Approved Budget (M)', 'Q3 Spend (M)', 'Absorption Rate', 'Status']]
+        for d in departments:
+            dept_data.append([
+                d.get('department', 'N/A'),
+                f"{d.get('approved_budget_kshm', 0):,.0f}",
+                f"{d.get('q3_spend_kshm', 0):,.0f}",
+                f"{d.get('absorption_rate', 0):.1f}%",
+                d.get('status', 'N/A'),
+            ])
+
+        dept_table = Table(dept_data, colWidths=[1.8*inch, 1.2*inch, 1.2*inch, 1*inch, 0.8*inch])
+        dept_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), REPORT_COLORS['table_header']),
+            ('TEXTCOLOR', (0, 0), (-1, 0), white),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 8),
+            ('ALIGN', (1, 0), (-1, -1), 'CENTER'),
+            ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+            ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+            ('GRID', (0, 0), (-1, -1), 0.5, REPORT_COLORS['muted_text']),
+            ('TOPPADDING', (0, 0), (-1, -1), 4),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [white, REPORT_COLORS['table_row_alt']]),
+        ]))
+        story.append(dept_table)
+        story.append(Spacer(1, 0.2*inch))
+
+    # Governor Audit Findings
+    story.append(Paragraph("County Audit Findings", styles['SubsectionHeading']))
+
+    gov_misappropriation = [a for a in county_audit if a.get('finding_type') == 'misappropriation']
+    gov_correct = [a for a in county_audit if a.get('finding_type') in ['correct', 'correct_appropriation']]
+
+    story.append(Paragraph(
+        f"The Office of the Auditor-General issued {len(county_audit)} findings for the county government. "
+        f"Of these, <b>{len(gov_misappropriation)} flag misappropriation</b> totaling "
+        f"KSh {total_flagged_kshm:,.1f}M, while <b>{len(gov_correct)} confirm correct appropriation</b>.",
+        styles['ReportBody']
+    ))
+    story.append(Spacer(1, 0.1*inch))
+
+    if gov_misappropriation:
+        story.append(Paragraph("Misappropriation Findings", styles['SubsectionHeading']))
+        story.append(create_finding_table(gov_misappropriation, styles))
+        story.append(Spacer(1, 0.2*inch))
+
+    if gov_correct:
+        story.append(Paragraph("Correct Appropriation Findings", styles['SubsectionHeading']))
+        story.append(create_finding_table(gov_correct, styles))
+        story.append(Spacer(1, 0.2*inch))
+
+    # Constituencies Section
+    story.append(PageBreak())
+    story.append(Paragraph("3. CONSTITUENCY ACCOUNTABILITY (NG-CDF)", styles['SectionHeading']))
+
+    # Summary table of all constituencies
+    story.append(Paragraph("Constituency Score Comparison", styles['SubsectionHeading']))
+
+    const_summary_data = [['Constituency', 'MP', 'Party', 'Score', 'Total Allocation (M)', 'Misappr.', 'Correct', 'Amt at Risk (M)']]
+    for cd in all_constituency_data:
+        c = cd["constituency"]
+        mp = cd["mp"]
+        score_tone = "Strong" if cd["score"] >= 75 else "Moderate" if cd["score"] >= 55 else "Needs Attention"
+        const_summary_data.append([
+            c.get('name', 'N/A'),
+            mp.get('name', 'N/A') if mp else 'N/A',
+            mp.get('party', 'N/A') if mp else 'N/A',
+            f"{cd['score']}/100 ({score_tone})",
+            f"{cd['total_allocation']:,.1f}",
+            str(cd['misappropriation_count']),
+            str(cd['correct_count']),
+            f"{cd['total_amount_at_risk']:,.1f}",
+        ])
+
+    const_table = Table(const_summary_data, colWidths=[0.9*inch, 1.1*inch, 0.6*inch, 1.2*inch, 1*inch, 0.6*inch, 0.6*inch, 1*inch])
+    const_table.setStyle(TableStyle([
+        ('BACKGROUND', (0, 0), (-1, 0), REPORT_COLORS['table_header']),
+        ('TEXTCOLOR', (0, 0), (-1, 0), white),
+        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+        ('FONTSIZE', (0, 0), (-1, -1), 7),
+        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+        ('ALIGN', (0, 0), (1, -1), 'LEFT'),
+        ('ALIGN', (0, 0), (0, -1), 'LEFT'),
+        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('GRID', (0, 0), (-1, -1), 0.5, REPORT_COLORS['muted_text']),
+        ('TOPPADDING', (0, 0), (-1, -1), 3),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+        ('ROWBACKGROUNDS', (0, 1), (-1, -1), [white, REPORT_COLORS['table_row_alt']]),
+    ]))
+    story.append(const_table)
+    story.append(Spacer(1, 0.3*inch))
+
+    # Individual constituency details
+    story.append(Paragraph("Individual Constituency Details", styles['SubsectionHeading']))
+
+    for cd in all_constituency_data:
+        c = cd["constituency"]
+        mp = cd["mp"]
+        audit = cd["audit"]
+        allocations = cd["allocations"]
+
+        story.append(Paragraph(f"<b>{c.get('name', 'N/A')} Constituency</b> — MP: {mp.get('name', 'N/A') if mp else 'N/A'} ({mp.get('party', 'N/A') if mp else 'N/A'})", styles['ReportBody']))
+        story.append(Paragraph(f"Score: {cd['score']}/100 | Total Allocation: KSh {cd['total_allocation']:,.1f}M", styles['ReportBody']))
+        story.append(Spacer(1, 0.05*inch))
+
+        # Allocations
+        if allocations:
+            alloc_data = [['Financial Year', 'Amount (KSh M)', 'Category', 'Status']]
+            for a in allocations:
+                alloc_data.append([
+                    a.get('fy_key', a.get('financial_year', 'N/A')).replace('FY', '').replace('_', '/'),
+                    f"{a.get('amount_kshm', 0):,.1f}",
+                    a.get('category', 'General'),
+                    a.get('status', 'Disbursed'),
+                ])
+
+            alloc_table = Table(alloc_data, colWidths=[1.5*inch, 1.5*inch, 1.5*inch, 1.5*inch])
+            alloc_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), REPORT_COLORS['secondary']),
+                ('TEXTCOLOR', (0, 0), (-1, 0), white),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 7),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                ('GRID', (0, 0), (-1, -1), 0.5, REPORT_COLORS['muted_text']),
+                ('TOPPADDING', (0, 0), (-1, -1), 3),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 3),
+                ('ROWBACKGROUNDS', (0, 1), (-1, -1), [white, REPORT_COLORS['table_row_alt']]),
+            ]))
+            story.append(alloc_table)
+            story.append(Spacer(1, 0.1*inch))
+
+        # Audit Findings
+        if audit:
+            misap = [a for a in audit if a.get('finding_type') == 'misappropriation']
+            correct = [a for a in audit if a.get('finding_type') == 'correct_appropriation']
+
+            if misap:
+                story.append(Paragraph("Misappropriation Findings:", styles['ReportBody']))
+                story.append(create_finding_table(misap, styles))
+                story.append(Spacer(1, 0.1*inch))
+
+            if correct:
+                story.append(Paragraph("Correct Appropriation Findings:", styles['ReportBody']))
+                story.append(create_finding_table(correct, styles))
+                story.append(Spacer(1, 0.1*inch))
+        else:
+            story.append(Paragraph("No audit findings recorded.", styles['ReportBody']))
+            story.append(Spacer(1, 0.1*inch))
+
+        story.append(Spacer(1, 0.15*inch))
+
+    # Overall Risk Assessment
+    story.append(PageBreak())
+    story.append(Paragraph("4. OVERALL RISK ASSESSMENT & RECOMMENDATIONS", styles['SectionHeading']))
+
+    if overall_county_score >= 75:
+        risk_level = "LOW"
+        risk_color = REPORT_COLORS['risk_low']
+        risk_text = (
+            "Nyeri County demonstrates strong overall accountability with effective financial "
+            "management at both county and constituency levels. High budget absorption rates and "
+            "minimal audit flags indicate robust governance. Continued transparency and proactive "
+            "oversight are recommended."
+        )
+    elif overall_county_score >= 55:
+        risk_level = "MODERATE"
+        risk_color = REPORT_COLORS['risk_medium']
+        risk_text = (
+            "Nyeri County shows mixed accountability performance. While some areas perform well, "
+            "audit findings at both county and constituency levels indicate areas needing improvement. "
+            "Strengthening internal controls, procurement processes, and project monitoring "
+            "should be prioritized across all levels of government."
+        )
+    else:
+        risk_level = "HIGH"
+        risk_color = REPORT_COLORS['risk_high']
+        risk_text = (
+            "Significant concerns exist regarding accountability and financial management across "
+            "Nyeri County. Multiple adverse audit findings and low absorption rates suggest systemic "
+            "issues. Immediate corrective action and enhanced oversight are required at both county "
+            "and constituency levels."
+        )
+
+    story.append(Paragraph(f"Overall County Risk Level: <font color='{risk_color}'><b>{risk_level}</b></font>", styles['ReportBody']))
+    story.append(Paragraph(risk_text, styles['ReportBody']))
+    story.append(Spacer(1, 0.2*inch))
+
+    # Consolidated Recommendations
+    story.append(Paragraph("Consolidated Key Recommendations", styles['SubsectionHeading']))
+    recommendations = [
+        "Implement stricter procurement oversight across all county departments and constituencies to prevent misappropriation",
+        "Improve budget absorption rates, particularly in underperforming county departments and constituencies with low NG-CDF utilization",
+        "Strengthen internal audit function and follow-up on Auditor-General recommendations at both county and constituency levels",
+        "Enhance public participation in budget formulation, monitoring, and NG-CDF project selection",
+        "Digitize financial records for real-time transparency and establish a unified county accountability dashboard",
+        "Establish community monitoring committees for all NG-CDF projects in every constituency",
+        "Ensure timely project completion and proper documentation for all development projects",
+        "Publish quarterly consolidated fund utilization reports for public scrutiny",
+    ]
+    for i, rec in enumerate(recommendations, 1):
+        story.append(Paragraph(f"{i}. {rec}", styles['ReportBullet']))
+
+    return story
+
+
+@reports_bp.route("/county/pdf", methods=["GET"])
+def generate_county_pdf_report():
+    """Generate an aggregated PDF accountability report for the entire county (Governor + all Constituencies)."""
+    try:
+        db = get_db()
+
+        # Verify we have at least a governor
+        governor = db.county_leaders.find_one({})
+        if not governor:
+            return jsonify({"error": "County data not found"}), 404
+
+        styles = get_report_styles()
+        story = build_county_report_story(db, styles)
+
+        if not story:
+            return jsonify({"error": "Failed to build report"}), 500
+
+        # Build PDF
+        buffer = io.BytesIO()
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            leftMargin=0.75*inch,
+            rightMargin=0.75*inch,
+            topMargin=0.8*inch,
+            bottomMargin=0.8*inch,
+        )
+
+        def page_template(canvas, doc):
+            add_header_footer(canvas, doc, "Nyeri County Aggregated Accountability Report", "Nyeri County")
+
+        doc.build(story, onFirstPage=page_template, onLaterPages=page_template)
+        buffer.seek(0)
+
+        return send_file(
+            buffer,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=f'Nyeri_County_Accountability_Report_{datetime.now().strftime("%Y%m%d")}.pdf'
+        )
+
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        return jsonify({"error": "Failed to generate county PDF report", "details": str(e)}), 500
+
+
 @reports_bp.route("/", methods=["GET"])
 def get_reports():
     """

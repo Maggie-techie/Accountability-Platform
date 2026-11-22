@@ -6,7 +6,7 @@ import { SearchBar } from '../components/Filters'
 import { AIDisclaimer } from '../components/Insights'
 import APIService from '../services/api'
 import { LEADER_PHOTOS } from '../utils/leaderPhotos'
-import { useAsyncData, Skeleton, AsyncContent } from '../hooks/useAsyncData.jsx'
+import { useSharedAsyncData, Skeleton, AsyncContent } from '../hooks/useAsyncData.jsx'
 
 
 export default function Home() {
@@ -16,27 +16,27 @@ export default function Home() {
   const [isSearching, setIsSearching] = useState(false)
 
   // Fetch data independently - each renders as it arrives
-  const { data: governor, isLoading: govLoading, error: govError, refresh: refreshGov } = useAsyncData(
+  const { data: governor, isLoading: govLoading, error: govError, refresh: refreshGov } = useSharedAsyncData(
     'governor-profile',
     () => APIService.getGovernorProfile(),
     { cacheTime: 10 * 60 * 1000 }
   )
 
-  const { data: constituenciesData, isLoading: constLoading, refresh: refreshConst } = useAsyncData(
+  const { data: constituenciesData, isLoading: constLoading, refresh: refreshConst } = useSharedAsyncData(
     'all-constituencies',
     () => APIService.getAllConstituencies(),
     { cacheTime: 10 * 60 * 1000 }
   )
   const constituencies = constituenciesData?.constituencies || constituenciesData || []
 
-  const { data: auditResponse, isLoading: auditLoading } = useAsyncData(
+  const { data: auditResponse, isLoading: auditLoading } = useSharedAsyncData(
     'county-audit-findings',
     () => APIService.getCountyAuditFindings(),
     { cacheTime: 5 * 60 * 1000 }
   )
   const auditFindings = auditResponse?.audit_findings || auditResponse || []
 
-  const { data: countyFinances, isLoading: financeLoading } = useAsyncData(
+  const { data: countyFinances, isLoading: financeLoading } = useSharedAsyncData(
     'county-finances',
     () => APIService.getCountyFinances(),
     { cacheTime: 10 * 60 * 1000 }
