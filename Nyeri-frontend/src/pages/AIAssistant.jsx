@@ -310,13 +310,13 @@ function formatAIResponse(aiData, question) {
 
 export default function AIAssistant() {
   const [params] = useSearchParams()
-  const about = params.get(‘about’)
+  const about = params.get('about')
   const [messages, setMessages] = useState(
     about
-      ? [{ role: ‘assistant’, type: ‘text’, content: `You’re asking about ${about}. Try a specific question below, e.g. "Explain ${about}’s accountability score."` }]
-      : [{ role: ‘assistant’, type: ‘text’, content: ‘Ask me anything about Nyeri County governance data — budgets, NG-CDF, audits or anomalies. I answer only in English, using the platform’s verified records.’ }]
+      ? [{ role: 'assistant', type: 'text', content: `You're asking about ${about}. Try a specific question below, e.g. "Explain ${about}'s accountability score."` }]
+      : [{ role: 'assistant', type: 'text', content: 'Ask me anything about Nyeri County governance data - budgets, NG-CDF, audits or anomalies. I answer only in English, using the platform\'s verified records.' }]
   )
-  const [input, setInput] = useState(‘’)
+  const [input, setInput] = useState('')
   const [loading, setLoading] = useState(false)
 
   // Ref for the messages container to enable auto-scroll
@@ -324,7 +324,7 @@ export default function AIAssistant() {
 
   // Auto-scroll to bottom when messages change
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: ‘smooth’ })
+    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
   function ask(question) {
@@ -390,7 +390,7 @@ export default function AIAssistant() {
       }
     }
 
-    fetchAIData()
+    fetchAnswer()
   }
 
   return (
@@ -463,12 +463,11 @@ export default function AIAssistant() {
               <form
                 onSubmit={(e) => { e.preventDefault(); if (input.trim()) ask(input.trim()) }}
                 className="flex gap-2"
-                disabled={loading}
               >
                 <input
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
-                  placeholder="Ask a governance question in English…"
+                  placeholder="Ask a governance question in English..."
                   className={`flex-1 rounded border border-line px-4 py-2.5 text-sm outline-none focus:border-forest-600 ${loading ? 'opacity-50' : ''}`}
                   disabled={loading}
                 />
