@@ -32,7 +32,7 @@ export default function CountyDashboard() {
   const { data: auditResponse, isLoading: auditLoading, refresh: refreshAudit } = useSharedAsyncData(
     'county-audit-findings',
     () => APIService.getCountyAuditFindings(),
-    { cacheTime: 5 * 60 * 1000 }
+    { cacheTime: 10 * 60 * 1000 }
   )
   const auditFindings = auditResponse?.audit_findings || auditResponse || []
 

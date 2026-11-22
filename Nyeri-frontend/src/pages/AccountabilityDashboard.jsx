@@ -41,14 +41,14 @@ export default function AccountabilityDashboard() {
   const { data: auditResponse, isLoading: auditLoading } = useSharedAsyncData(
     'accountability-audit',
     () => APIService.getCountyAuditFindings(),
-    { cacheTime: 5 * 60 * 1000 }
+    { cacheTime: 10 * 60 * 1000 }
   )
   const countyAuditFindings = auditResponse?.audit_findings || auditResponse || []
 
   const { data: findingsClassifierResponse, isLoading: anomaliesLoading } = useSharedAsyncData(
     'accountability-anomalies',
     () => APIService.getCountyFindingsClassifier().catch(() => ({ success: false })),
-    { cacheTime: 5 * 60 * 1000 }
+    { cacheTime: 10 * 60 * 1000 }
   )
   const anomalies = (findingsClassifierResponse?.success && findingsClassifierResponse.data?.narrative_fields?.findings) || []
 

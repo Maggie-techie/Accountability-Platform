@@ -28,7 +28,7 @@ export default function ConstituencyProfile() {
   const { data: auditResponse, isLoading: auditLoading } = useSharedAsyncData(
     `constituency-audit-${slug}`,
     () => slug ? APIService.getConstituencyAuditFindings(slug) : Promise.resolve(null),
-    { cacheTime: 5 * 60 * 1000, immediate: !!slug }
+    { cacheTime: 10 * 60 * 1000, immediate: !!slug }
   )
   const auditFindings = auditResponse?.audit_findings || auditResponse || []
 
@@ -56,7 +56,7 @@ export default function ConstituencyProfile() {
         return { success: false, error: err.message }
       }
     },
-    { cacheTime: 5 * 60 * 1000, immediate: !!slug }
+    { cacheTime: 10 * 60 * 1000, immediate: !!slug }
   )
   const anomaliesData = (anomaliesResponse?.success && anomaliesResponse.data) || []
 

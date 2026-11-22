@@ -27,7 +27,7 @@ export default function Reports() {
         throw new Error('Failed to load reports')
       }
     },
-    { cacheTime: 5 * 60 * 1000 }
+    { cacheTime: 10 * 60 * 1000 }
   )
   const reportsList = reportsData || []
 
