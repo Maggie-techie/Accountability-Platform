@@ -90,6 +90,19 @@ export default function ConstituencyProfile() {
         // We need to transform allocations to match the mock allocationTrend format:
         // [{ fy: '2022/23', Kieni: 165.7, Mathira: 151.9, Othaya: 118.0, Tetu: 131.3, 'Mukurwe-ini': 110.2, 'Nyeri Town': 120.8 }, ...]
 
+        // Helper to convert slug to proper constituency name for chart keys
+        const slugToChartKey = (slug) => {
+          const map = {
+            'kieni': 'Kieni',
+            'mathira': 'Mathira',
+            'othaya': 'Othaya',
+            'tetu': 'Tetu',
+            'mukurweini': 'Mukurwe-ini',
+            'nyeri_town': 'Nyeri Town',
+          }
+          return map[slug] || slug
+        }
+
         if (allocationsResponse && allocationsResponse.allocations) {
           // Group allocations by fiscal year and constituency
           const allocationsByYear = {}
@@ -111,7 +124,9 @@ export default function ConstituencyProfile() {
             const amount = alloc.amount_kshm || alloc.amount || alloc.allocated_amount || 0
 
             if (constituencyIdentifier && constituencyIdentifier !== 'unknown') {
-              allocationsByYear[fy][constituencyIdentifier] = amount
+              // Convert slug to proper chart key
+              const chartKey = slugToChartKey(constituencyIdentifier)
+              allocationsByYear[fy][chartKey] = amount
             }
           })
 
@@ -226,11 +241,15 @@ export default function ConstituencyProfile() {
   }
 
   // Ensure we have at least some allocation trend data for the chart
+  // Determine the constituency key for chart data (matches allocationTrend format)
+  const constituencyChartKey = constituency.name === 'Mukurwe-ini' ? 'Mukurwe-ini' : constituency.name
+
+  // Ensure we have at least some allocation trend data for the chart
   const chartData = allocationTrend.length > 0 ? allocationTrend : [
-    { fy: '2022/23', allocation: constituency.totalAllocationKshm || 0 },
-    { fy: '2023/24', allocation: constituency.totalAllocationKshm || 0 },
-    { fy: '2024/25', allocation: constituency.totalAllocationKshm || 0 },
-    { fy: '2025/26', allocation: constituency.totalAllocationKshm || 0 }
+    { fy: '2022/23', [constituencyChartKey]: constituency.totalAllocationKshm || 0 },
+    { fy: '2023/24', [constituencyChartKey]: constituency.totalAllocationKshm || 0 },
+    { fy: '2024/25', [constituencyChartKey]: constituency.totalAllocationKshm || 0 },
+    { fy: '2025/26', [constituencyChartKey]: constituency.totalAllocationKshm || 0 }
   ]
 
   // Filter findings and anomalies for this constituency (though they should already be filtered by backend)
@@ -274,7 +293,7 @@ export default function ConstituencyProfile() {
                   <RTooltip contentStyle={{ fontSize: 13, borderRadius: 6, borderColor: '#E2E5E1' }} />
                   {/* We need to determine what the line should represent - for now using a placeholder */}
                   {/* In reality, we'd need to know which constituency this is for the line data */}
-                  <Line type="monotone" dataKey="fy" stroke="#14532D" strokeWidth={2} dot={{ r: 3 }} />
+                  <Line type="monotone" dataKey={constituencyChartKey} stroke="#14532D" strokeWidth={2} dot={{ r: 3 }} />
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -295,8 +314,8 @@ export default function ConstituencyProfile() {
                        <p className="text-xs text-ink-faint mt-1">{f.mp_name}</p> 
                       )}
                     </div>
-                    <Badge tone={f.finding_type === 'Misappropriation' ? 'risk' : 'good'}>
-                      {f.finding_type === 'Misappropriation' ? 'Misappropriation' : 'Correct appropriation'}
+                    <Badge tone={f.finding_type?.toLowerCase() === 'misappropriation' ? 'risk' : 'good'}>
+                      {f.finding_type?.toLowerCase() === 'misappropriation' ? 'Misappropriation' : 'Correct appropriation'}
                     </Badge>
                   </li>
                 ))}

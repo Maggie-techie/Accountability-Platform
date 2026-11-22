@@ -7,6 +7,7 @@ import { EmptyState } from '../components/ui'
 import { scoreCategory } from '../data/mockData'
 import { LEADER_PHOTOS } from '../utils/leaderPhotos'
 import APIService from '../services/api'
+import { useAsyncData, Skeleton, AsyncContent } from '../hooks/useAsyncData.jsx'
 
 export default function Leaders() {
   const [params] = useSearchParams()
@@ -14,42 +15,27 @@ export default function Leaders() {
   const [position, setPosition] = useState('')
   const [place, setPlace] = useState('')
 
-  // State for data fetching
-  const [governorData, setGovernorData] = useState(null)
-  const [governorScore, setGovernorScore] = useState(null)
-  const [constituenciesData, setConstituenciesData] = useState([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
+  // Fetch data independently
+  const { data: governorData, isLoading: govLoading, error: govError, refresh: refreshGov } = useAsyncData(
+    'governor-profile',
+    () => APIService.getGovernorProfile(),
+    { cacheTime: 10 * 60 * 1000 }
+  )
+  const { data: governorScoreData, isLoading: govScoreLoading } = useAsyncData(
+    'governor-score',
+    () => APIService.getGovernorScore(),
+    { cacheTime: 10 * 60 * 1000 }
+  )
+  const governorScore = governorScoreData?.score
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true)
-        // Fetch governor data, governor score, and constituencies with scores in parallel
-        const [governorResponse, governorScoreResponse, constituenciesWithScores] = await Promise.all([
-          APIService.getGovernorProfile(),
-          APIService.getGovernorScore(),
-          APIService.getAllConstituencyScores()
-        ])
+  const { data: constituenciesWithScores, isLoading: constLoading, error: constError, refresh: refreshConst } = useAsyncData(
+    'all-constituency-scores',
+    () => APIService.getAllConstituencyScores(),
+    { cacheTime: 10 * 60 * 1000 }
+  )
+  const constituenciesData = constituenciesWithScores || []
 
-        setGovernorData(governorResponse)
-        setGovernorScore(governorScoreResponse.score)
-        setConstituenciesData(constituenciesWithScores)
-        setError(null)
-      } catch (err) {
-        setError(err.message || 'Failed to load leaders data')
-        setGovernorData(null)
-        setGovernorScore(null)
-        setConstituenciesData([])
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    fetchData()
-  }, [])
-  
-  // Create allLeaders array from fetched data (similar to original logic)
+  // Create allLeaders array from fetched data
   const allLeaders = useMemo(() => {
     const leaders = []
 
@@ -84,7 +70,7 @@ export default function Leaders() {
 
     return leaders
   }, [governorData, governorScore, constituenciesData])
-  
+
   const filtered = useMemo(() => {
     return allLeaders.filter((l) =>
       (!q || l.name.toLowerCase().includes(q.toLowerCase()) || l.place.toLowerCase().includes(q.toLowerCase())) &&
@@ -95,29 +81,8 @@ export default function Leaders() {
 
   const { page, setPage, totalPages, pageItems } = usePagination(filtered, 9)
 
-  // Handle case where data is still loading or there was an error
-  if (loading) {
-    return (
-      <div className="max-w-content mx-auto px-4 sm:px-6 py-8">
-        <Breadcrumbs items={[{ label: 'Leaders' }]} />
-        <h1 className="text-3xl font-semibold mb-2">Leaders directory</h1>
-        <p className="text-ink-muted mb-6 max-w-2xl">Loading leaders...</p>
-      </div>
-    )
-  }
-
-  if (error) {
-    return (
-      <div className="max-w-content mx-auto px-4 sm:px-6 py-8">
-        <Breadcrumbs items={[{ label: 'Leaders' }]} />
-        <h1 className="text-3xl font-semibold mb-2">Leaders directory</h1>
-        <p className="text-ink-danger mb-6">{error}</p>
-        <button onClick={() => window.location.reload()} className="btn btn-outline">
-          Try again
-        </button>
-      </div>
-    )
-  }
+  const anyLoading = govLoading || govScoreLoading || constLoading
+  const anyError = govError || constError
 
   return (
     <div className="max-w-content mx-auto px-4 sm:px-6 py-8">
@@ -132,94 +97,122 @@ export default function Leaders() {
         <Select label="Constituency / County" value={place} onChange={setPlace} options={['Nyeri County', ...constituenciesData.map((c) => c.name)]} />
       </FilterBar>
 
-      {filtered.length === 0 ? (
-        <EmptyState title="No leaders match your search" description="Try a different name, or clear your filters." />
-      ) : (
-        <>
+      <AsyncContent
+        isLoading={anyLoading}
+        error={anyError}
+        onRetry={() => { refreshGov(); refreshConst(); }}
+        emptyMessage="No leaders found"
+        skeleton={
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-6">
-            {pageItems.map((l) => {
-              const { tone } = scoreCategory(l.score)
-              return (
-                <Card key={l.id} className="p-4 flex flex-col">
-                  <div className="flex items-start gap-3 mb-3">
-                    {/* Determine photo key based on leader type and name/place */}
-                    <div className="h-12 w-12 rounded-full bg-forest-100 flex items-center justify-center text-forest-700 font-serif font-semibold shrink-0 relative overflow-hidden">
-                      {/* Try to get photo from LEADER_PHOTOS */}
-                      {(() => {
-                        let photoKey = null;
-                        let photo = null;
-
-                        // For governor
-                        if (l.position === 'Governor') {
-                          photoKey = 'governor';
-                          photo = LEADER_PHOTOS[photoKey];
-                        }
-                        // For MPs - match by place (constituency name)
-                        else if (l.position === 'Member of Parliament') {
-                          // Normalize place name to match photo keys
-                          const normalizedPlace = l.place
-                            .toLowerCase()
-                            .replace(/\s+/g, '_') // Replace spaces with underscores
-                            .replace(/['-]/g, ''); // Remove apostrophes and hyphens
-
-                          // Check if we have a photo for this constituency
-                          if (LEADER_PHOTOS[normalizedPlace]) {
-                            photoKey = normalizedPlace;
-                            photo = LEADER_PHOTOS[photoKey];
-                          }
-                          // Special case for Mukurwe-ini (has hyphen in name)
-                          else if (l.place === 'Mukurwe-ini') {
-                            photoKey = 'mukurweini';
-                            photo = LEADER_PHOTOS[photoKey];
-                          }
-                          // Special case for Nyeri Town
-                          else if (l.place === 'Nyeri Town') {
-                            photoKey = 'nyeri_town';
-                            photo = LEADER_PHOTOS[photoKey];
-                          }
-                        }
-
-                        // Return photo if available, otherwise fall back to initials
-                        if (photo) {
-                          return (
-                            <img
-                              src={photo}
-                              alt={`${l.name} photo`}
-                              className="h-full w-full object-cover"
-                              onError={(e) => {
-                                // Fallback to initials if image fails to load
-                                e.currentTarget.onerror = null;
-                                e.currentTarget.src = '';
-                                e.currentTarget.alt = '';
-                              }}
-                            />
-                          );
-                        }
-
-                        // Fallback to initials
-                        return l.name.split(' ').slice(-1)[0][0];
-                      })()}
-                    </div>
-                    <div className="min-w-0">
-                      <p className="font-serif font-semibold text-ink truncate">{l.name}</p>
-                      <p className="text-xs text-ink-muted">{l.position} &middot; {l.party}</p>
-                      <p className="text-xs text-ink-faint">{l.place}</p>
-                    </div>
+            {[1,2,3,4,5,6,7].map(i => (
+              <Card key={i} className="p-4 flex flex-col">
+                <div className="flex items-start gap-3 mb-3">
+                  <Skeleton variant="avatar" className="h-12 w-12" />
+                  <div className="min-w-0 space-y-1">
+                    <Skeleton variant="title" className="w-3/4" />
+                    <Skeleton variant="text" className="w-1/2" />
+                    <Skeleton variant="text" className="w-1/3" />
                   </div>
-                  <p className="text-sm text-ink-muted flex-1">{l.summary}</p>
-                  <div className="flex items-center justify-between mt-4 pt-3 border-t border-line">
-                    <Badge tone={tone}>Score {l.score}</Badge>
-                    <Link to={`/leaders/${l.id}`}>
-                      <Button size="sm" variant="secondary">View Profile</Button>
-                    </Link>
-                  </div>
-                </Card>
-              )
-            })}
+                </div>
+                <Skeleton variant="text" className="w-full flex-1" />
+                <div className="flex items-center justify-between mt-4 pt-3 border-t border-line">
+                  <Skeleton variant="badge" />
+                  <Skeleton variant="text" className="w-24" />
+                </div>
+              </Card>
+            ))}
           </div>
-          <Pagination page={page} totalPages={totalPages} onChange={setPage} />
-        </>
-      )}
+        }
+      >
+        {filtered.length === 0 ? (
+          <EmptyState title="No leaders match your search" description="Try a different name, or clear your filters." />
+        ) : (
+          <>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-6">
+              {pageItems.map((l) => {
+                const { tone } = scoreCategory(l.score)
+                return (
+                  <Card key={l.id} className="p-4 flex flex-col">
+                    <div className="flex items-start gap-3 mb-3">
+                      {/* Determine photo key based on leader type and name/place */}
+                      <div className="h-12 w-12 rounded-full bg-forest-100 flex items-center justify-center text-forest-700 font-serif font-semibold shrink-0 relative overflow-hidden">
+                        {/* Try to get photo from LEADER_PHOTOS */}
+                        {(() => {
+                          let photoKey = null;
+                          let photo = null;
+
+                          // For governor
+                          if (l.position === 'Governor') {
+                            photoKey = 'governor';
+                            photo = LEADER_PHOTOS[photoKey];
+                          }
+                          // For MPs - match by place (constituency name)
+                          else if (l.position === 'Member of Parliament') {
+                            // Normalize place name to match photo keys
+                            const normalizedPlace = l.place
+                              .toLowerCase()
+                              .replace(/\s+/g, '_') // Replace spaces with underscores
+                              .replace(/['-]/g, ''); // Remove apostrophes and hyphens
+
+                            // Check if we have a photo for this constituency
+                            if (LEADER_PHOTOS[normalizedPlace]) {
+                              photoKey = normalizedPlace;
+                              photo = LEADER_PHOTOS[photoKey];
+                            }
+                            // Special case for Mukurwe-ini (has hyphen in name)
+                            else if (l.place === 'Mukurwe-ini') {
+                              photoKey = 'mukurweini';
+                              photo = LEADER_PHOTOS[photoKey];
+                            }
+                            // Special case for Nyeri Town
+                            else if (l.place === 'Nyeri Town') {
+                              photoKey = 'nyeri_town';
+                              photo = LEADER_PHOTOS[photoKey];
+                            }
+                          }
+
+                          // Return photo if available, otherwise fall back to initials
+                          if (photo) {
+                            return (
+                              <img
+                                src={photo}
+                                alt={`${l.name} photo`}
+                                className="h-full w-full object-cover"
+                                onError={(e) => {
+                                  // Fallback to initials if image fails to load
+                                  e.currentTarget.onerror = null;
+                                  e.currentTarget.src = '';
+                                  e.currentTarget.alt = '';
+                                }}
+                              />
+                            );
+                          }
+
+                          // Fallback to initials
+                          return l.name.split(' ').slice(-1)[0][0];
+                        })()}
+                      </div>
+                      <div className="min-w-0">
+                        <p className="font-serif font-semibold text-ink truncate">{l.name}</p>
+                        <p className="text-xs text-ink-muted">{l.position} &middot; {l.party}</p>
+                        <p className="text-xs text-ink-faint">{l.place}</p>
+                      </div>
+                    </div>
+                    <p className="text-sm text-ink-muted flex-1">{l.summary}</p>
+                    <div className="flex items-center justify-between mt-4 pt-3 border-t border-line">
+                      <Badge tone={tone}>Score {l.score}</Badge>
+                      <Link to={`/leaders/${l.id}`}>
+                        <Button size="sm" variant="secondary">View Profile</Button>
+                      </Link>
+                    </div>
+                  </Card>
+                )
+              })}
+            </div>
+            <Pagination page={page} totalPages={totalPages} onChange={setPage} />
+          </>
+        )}
+      </AsyncContent>
     </div>
   )
 }

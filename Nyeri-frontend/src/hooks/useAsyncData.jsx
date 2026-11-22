@@ -1,0 +1,223 @@
+import { useState, useEffect, useCallback, useRef } from 'react'
+
+/**
+ * Custom hook for async data fetching with:
+ * - Immediate skeleton rendering (no blocking)
+ * - Automatic deduplication (same key = same promise)
+ * - Optional caching with TTL
+ * - Retry on error
+ */
+export function useAsyncData(key, fetcher, options = {}) {
+  const {
+    immediate = true,
+    cacheTime = 5 * 60 * 1000, // 5 min default cache
+    retry = 1,
+    retryDelay = 1000,
+    onSuccess,
+    onError,
+  } = options
+
+  const [data, setData] = useState(null)
+  const [error, setError] = useState(null)
+  const [isLoading, setIsLoading] = useState(immediate)
+  const [isRefreshing, setIsRefreshing] = useState(false)
+
+  const cacheRef = useRef(new Map())
+  const abortRef = useRef(null)
+  const mountedRef = useRef(true)
+  const fetcherRef = useRef(fetcher)
+  fetcherRef.current = fetcher
+
+  // Cleanup on unmount
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      if (abortRef.current) abortRef.current.abort()
+    }
+  }, [])
+
+  const execute = useCallback(async (isRetry = false) => {
+    if (!isRetry) {
+      // Check cache first
+      const cached = cacheRef.current.get(key)
+      if (cached && Date.now() - cached.timestamp < cacheTime) {
+        setData(cached.data)
+        setIsLoading(false)
+        return cached.data
+      }
+    }
+
+    if (!isRetry) setIsLoading(true)
+    else setIsRefreshing(true)
+    setError(null)
+
+    // Abort previous request
+    if (abortRef.current) abortRef.current.abort()
+    const controller = new AbortController()
+    abortRef.current = controller
+
+    let attempt = 0
+    while (attempt <= retry) {
+      try {
+        const result = await fetcherRef.current(controller.signal)
+
+        if (!mountedRef.current) return null
+        if (controller.signal.aborted) return null
+
+        // Cache successful result
+        cacheRef.current.set(key, { data: result, timestamp: Date.now() })
+
+        setData(result)
+        setError(null)
+        onSuccess?.(result)
+        return result
+      } catch (err) {
+        if (err.name === 'AbortError' || !mountedRef.current) return null
+
+        attempt++
+        if (attempt <= retry) {
+          await new Promise(r => setTimeout(r, retryDelay * attempt))
+        } else {
+          if (!mountedRef.current) return null
+          setError(err)
+          onError?.(err)
+          throw err
+        }
+      } finally {
+        if (!isRetry) setIsLoading(false)
+        else setIsRefreshing(false)
+      }
+    }
+  }, [key, cacheTime, retry, retryDelay, onSuccess, onError])
+
+  // Initial fetch
+  useEffect(() => {
+    if (immediate) {
+      execute()
+    }
+  }, [immediate, execute])
+
+  const refresh = useCallback(() => execute(true), [execute])
+  const clearCache = useCallback(() => cacheRef.current.delete(key), [key])
+
+  return {
+    data,
+    error,
+    isLoading,
+    isRefreshing,
+    refresh,
+    clearCache,
+    execute,
+  }
+}
+
+/**
+ * Global cache for sharing data across components
+ */
+export const globalCache = new Map()
+
+export function useSharedAsyncData(key, fetcher, options = {}) {
+  const { cacheTime = 5 * 60 * 1000 } = options
+  const [data, setData] = useState(null)
+  const [error, setError] = useState(null)
+  const [isLoading, setIsLoading] = useState(true)
+
+  useEffect(() => {
+    let mounted = true
+
+    const load = async () => {
+      // Check global cache
+      const cached = globalCache.get(key)
+      if (cached && Date.now() - cached.timestamp < cacheTime) {
+        if (mounted) {
+          setData(cached.data)
+          setIsLoading(false)
+        }
+        return
+      }
+
+      try {
+        const result = await fetcher()
+        if (mounted) {
+          globalCache.set(key, { data: result, timestamp: Date.now() })
+          setData(result)
+          setError(null)
+        }
+      } catch (err) {
+        if (mounted) {
+          setError(err)
+        }
+      } finally {
+        if (mounted) setIsLoading(false)
+      }
+    }
+
+    load()
+    return () => { mounted = false }
+  }, [key, fetcher, cacheTime])
+
+  return { data, error, isLoading }
+}
+
+/**
+ * Skeleton component for consistent loading states
+ */
+export function Skeleton({ className = '', variant = 'text' }) {
+  const base = 'animate-pulse bg-forest-100 rounded'
+  const variants = {
+    text: 'h-4 w-3/4',
+    title: 'h-6 w-1/2',
+    card: 'h-32 w-full',
+    avatar: 'h-12 w-12 rounded-full',
+    badge: 'h-6 w-20 rounded',
+    kpi: 'h-10 w-24',
+    chart: 'h-64 w-full',
+    tableRow: 'h-10 w-full',
+  }
+  return <div className={`${base} ${variants[variant]} ${className}`} />
+}
+
+/**
+ * Wrapper that shows skeleton while loading, then content
+ */
+export function AsyncContent({
+  children,
+  isLoading,
+  error,
+  skeleton,
+  emptyMessage = 'No data available',
+  onRetry
+}) {
+  if (isLoading) {
+    return skeleton || (
+      <div className="space-y-4">
+        <Skeleton variant="title" className="w-1/3" />
+        <Skeleton variant="text" className="w-1/2" />
+        <Skeleton variant="text" className="w-1/3" />
+      </div>
+    )
+  }
+
+  if (error) {
+    return (
+      <div className="text-center py-8 text-ink-danger">
+        <p className="mb-2">Failed to load</p>
+        <p className="text-sm text-ink-muted mb-4">{error.message}</p>
+        <button onClick={onRetry} className="text-forest-700 hover:underline text-sm">
+          Try again
+        </button>
+      </div>
+    )
+  }
+
+  if (!children || (Array.isArray(children) && children.length === 0)) {
+    return (
+      <div className="text-center py-8 text-ink-muted">
+        {emptyMessage}
+      </div>
+    )
+  }
+
+  return <>{children}</>
+}

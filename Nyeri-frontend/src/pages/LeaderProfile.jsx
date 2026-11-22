@@ -352,8 +352,8 @@ export default function LeaderProfile() {
                   <>
                     <div className="flex justify-between gap-3 mb-2">
                       <p className="font-medium text-ink whitespace-pre-line">{f.category}</p>
-                      <Badge tone={f.finding_type === 'misappropriation' ? 'risk' : 'good'}>
-                        {f.finding_type === 'misappropriation' ? 'Misappropriation' : 'Correct appropriation'}
+                      <Badge tone={f.finding_type?.toLowerCase() === 'misappropriation' ? 'risk' : 'good'}>
+                        {f.finding_type?.toLowerCase() === 'misappropriation' ? 'Misappropriation' : 'Correct appropriation'}
                       </Badge>
                     </div>
                     <p className="text-sm text-ink-muted">{f.misappropriation_notes}</p>
@@ -370,8 +370,8 @@ export default function LeaderProfile() {
                   <>
                     <div className="flex justify-between gap-3 mb-2">
                       <p className="font-medium text-ink">{f.id}</p>
-                      <Badge tone={f.finding_type === 'misappropriation' ? 'risk' : 'good'}>
-                        {f.finding_type === 'misappropriation' ? 'Misappropriation' : 'Correct appropriation'}
+                      <Badge tone={f.finding_type?.toLowerCase() === 'misappropriation' ? 'risk' : 'good'}>
+                        {f.finding_type?.toLowerCase() === 'misappropriation' ? 'Misappropriation' : 'Correct appropriation'}
                       </Badge>
                     </div>
                       <p className="text-sm text-ink-muted">{f.finding || f.note}</p>
