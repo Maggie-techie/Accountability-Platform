@@ -226,11 +226,15 @@ export default function ConstituencyProfile() {
   }
 
   // Ensure we have at least some allocation trend data for the chart
+  // Determine the constituency key for chart data (matches allocationTrend format)
+  const constituencyChartKey = constituency.name === 'Mukurwe-ini' ? 'Mukurwe-ini' : constituency.name
+
+  // Ensure we have at least some allocation trend data for the chart
   const chartData = allocationTrend.length > 0 ? allocationTrend : [
-    { fy: '2022/23', allocation: constituency.totalAllocationKshm || 0 },
-    { fy: '2023/24', allocation: constituency.totalAllocationKshm || 0 },
-    { fy: '2024/25', allocation: constituency.totalAllocationKshm || 0 },
-    { fy: '2025/26', allocation: constituency.totalAllocationKshm || 0 }
+    { fy: '2022/23', [constituencyChartKey]: constituency.totalAllocationKshm || 0 },
+    { fy: '2023/24', [constituencyChartKey]: constituency.totalAllocationKshm || 0 },
+    { fy: '2024/25', [constituencyChartKey]: constituency.totalAllocationKshm || 0 },
+    { fy: '2025/26', [constituencyChartKey]: constituency.totalAllocationKshm || 0 }
   ]
 
   // Filter findings and anomalies for this constituency (though they should already be filtered by backend)
@@ -274,7 +278,7 @@ export default function ConstituencyProfile() {
                   <RTooltip contentStyle={{ fontSize: 13, borderRadius: 6, borderColor: '#E2E5E1' }} />
                   {/* We need to determine what the line should represent - for now using a placeholder */}
                   {/* In reality, we'd need to know which constituency this is for the line data */}
-                  <Line type="monotone" dataKey="fy" stroke="#14532D" strokeWidth={2} dot={{ r: 3 }} />
+                  <Line type="monotone" dataKey={constituencyChartKey} stroke="#14532D" strokeWidth={2} dot={{ r: 3 }} />
                 </LineChart>
               </ResponsiveContainer>
             </div>
@@ -295,8 +299,8 @@ export default function ConstituencyProfile() {
                        <p className="text-xs text-ink-faint mt-1">{f.mp_name}</p> 
                       )}
                     </div>
-                    <Badge tone={f.finding_type === 'Misappropriation' ? 'risk' : 'good'}>
-                      {f.finding_type === 'Misappropriation' ? 'Misappropriation' : 'Correct appropriation'}
+                    <Badge tone={f.finding_type?.toLowerCase() === 'misappropriation' ? 'risk' : 'good'}>
+                      {f.finding_type?.toLowerCase() === 'misappropriation' ? 'Misappropriation' : 'Correct appropriation'}
                     </Badge>
                   </li>
                 ))}

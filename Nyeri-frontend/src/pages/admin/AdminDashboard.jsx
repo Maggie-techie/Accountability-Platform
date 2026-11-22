@@ -181,7 +181,7 @@ export default function AdminDashboard() {
   ).length
 
   const recentFindings = toArray(adminSummary.recent_findings)
-  const flaggedRecent = recentFindings.filter((f) => f?.finding_type === 'misappropriation').length
+  const flaggedRecent = recentFindings.filter((f) => f?.finding_type?.toLowerCase() === 'misappropriation').length
 
   // Prefer backend values if they are ever added; otherwise derive or show a neutral default.
   const validationStatus =

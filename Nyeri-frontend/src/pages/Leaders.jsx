@@ -7,7 +7,7 @@ import { EmptyState } from '../components/ui'
 import { scoreCategory } from '../data/mockData'
 import { LEADER_PHOTOS } from '../utils/leaderPhotos'
 import APIService from '../services/api'
-import { useAsyncData, Skeleton, AsyncContent } from '../hooks/useAsyncData'
+import { useAsyncData, Skeleton, AsyncContent } from '../hooks/useAsyncData.jsx'
 
 export default function Leaders() {
   const [params] = useSearchParams()

@@ -66,7 +66,7 @@ class APIService {
       const totalAllocationKshm = constituencyAllocations.reduce((sum, a) => sum + (a.amount_kshm || 0), 0);
 
       // Count misappropriations
-      const misappropriationCount = constituencyAudit.filter(f => f.finding_type === 'misappropriation' || f.finding_type === 'Misappropriation').length;
+      const misappropriationCount = constituencyAudit.filter(f => f.finding_type?.toLowerCase() === 'misappropriation').length;
 
       // Get audit status from MP data
       const auditStatus = mpData.audit_status || mpData.auditStatus || 'Unknown';

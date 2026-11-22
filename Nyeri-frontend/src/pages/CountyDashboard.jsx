@@ -6,7 +6,7 @@ import { Breadcrumbs, Table } from '../components/DataDisplay'
 import { KpiCard } from '../components/Insights'
 import { LEADER_PHOTOS } from '../utils/leaderPhotos'
 import APIService from '../services/api'
-import { useAsyncData, Skeleton, AsyncContent } from '../hooks/useAsyncData'
+import { useAsyncData, Skeleton, AsyncContent } from '../hooks/useAsyncData.jsx'
 
 export default function CountyDashboard() {
   // Fetch data independently - each renders as it arrives

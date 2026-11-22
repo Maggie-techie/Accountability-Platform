@@ -6,7 +6,7 @@ import { SearchBar } from '../components/Filters'
 import { AIDisclaimer } from '../components/Insights'
 import APIService from '../services/api'
 import { LEADER_PHOTOS } from '../utils/leaderPhotos'
-import { useAsyncData, Skeleton, AsyncContent } from '../hooks/useAsyncData'
+import { useAsyncData, Skeleton, AsyncContent } from '../hooks/useAsyncData.jsx'
 
 
 export default function Home() {
@@ -254,7 +254,7 @@ export default function Home() {
                   <Card className="p-4 h-full hover:border-forest-300 transition-colors">
                     <div className="flex items-center justify-between mb-2">
                       <p className="font-serif font-semibold text-ink">{c.name}</p>
-                      <Badge tone={c.audit_status === 'Unqualified' ? 'good' : c.audit_status === 'Qualified' ? 'watch' : 'risk'}>
+                      <Badge tone={c.audit_status === 'Qualified' ? 'good' : c.audit_status === 'Unqualified' ? 'watch' : 'risk'}>
                         {c.audit_status}
                       </Badge>
                     </div>

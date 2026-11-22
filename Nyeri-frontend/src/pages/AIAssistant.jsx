@@ -108,7 +108,7 @@ async function handleSimpleQuestion(question) {
       const auditData = await APIService.getConstituencyAuditFindings(matched.slug)
       const findings = auditData?.audit_findings || auditData || []
       if (findings.length) {
-        const misap = findings.filter(f => f.finding_type === 'misappropriation' || f.finding_type === 'Misappropriation')
+        const misap = findings.filter(f => f.finding_type?.toLowerCase() === 'misappropriation')
         return {
           answer: `**${matched.name} Constituency Audit Findings:**\nTotal findings: ${findings.length}\nMisappropriation findings: ${misap.length}\n\n${findings.slice(0, 3).map(f => `• ${f.finding_type || 'Finding'}: ${f.finding || f.note || 'No details'}`).join('\n')}${findings.length > 3 ? '\n...and more' : ''}`,
           figures: [{ label: 'Total Findings', value: findings.length }, { label: 'Misappropriations', value: misap.length }],

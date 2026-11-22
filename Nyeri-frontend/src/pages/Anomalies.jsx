@@ -70,7 +70,7 @@ function transformDepartmentFlags(aiData) {
 // Transform audit findings (misappropriation) to common format
 function transformAuditFindings(findings, entityName, entityType) {
   return findings
-    .filter(f => f.finding_type === 'misappropriation' || f.finding_type === 'Misappropriation')
+    .filter(f => f.finding_type?.toLowerCase() === 'misappropriation')
     .map((f, i) => ({
       id: `audit-${entityType}-${entityName.replace(/\s+/g, '-')}-${f.id || f._id || i}`,
       title: f.note || f.finding || f.misappropriation_notes || 'Misappropriation found',
