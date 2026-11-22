@@ -217,32 +217,32 @@ export default function CountyDashboard() {
       >
         {departments.length > 0 && (
           <>
-          <Card className="p-6 mb-6">
-            <h3 className="font-serif font-semibold text-lg mb-4">Departmental absorption, FY2024/25</h3>
-            <Table
-              columns={['Department', 'Approved Budget', 'Q3 Spend', 'Absorption', 'Status']}
-              rows={departments}
-              keyField="_id"
-              renderRow={(d) => (
-                <>
-                  <td className="py-3 pr-4 font-medium text-ink">{d.department}</td>
-                  <td className="py-3 pr-4 text-ink-muted">KSh {d.approved_budget_kshm}M</td>
-                  <td className="py-3 pr-4 text-ink-muted">KSh {d.q3_spend_kshm}M</td>
-                  <td className="py-3 pr-4 text-ink-muted">{d.absorption_rate}%</td>
-                  <td className="py-3 pr-4">
-                    <Badge tone={d.status === 'On Track' ? 'good' : d.status === 'Behind' ? 'watch' : 'risk'}>{d.status}</Badge>
-                  </td>
-                </>
-              )}
-            />
-          </Card>
+            <Card className="p-6 mb-6">
+              <h3 className="font-serif font-semibold text-lg mb-4">Departmental absorption, FY2024/25</h3>
+              <Table
+                columns={['Department', 'Approved Budget', 'Q3 Spend', 'Absorption', 'Status']}
+                rows={departments}
+                keyField="_id"
+                renderRow={(d) => (
+                  <>
+                    <td className="py-3 pr-4 font-medium text-ink">{d.department}</td>
+                    <td className="py-3 pr-4 text-ink-muted">KSh {d.approved_budget_kshm}M</td>
+                    <td className="py-3 pr-4 text-ink-muted">KSh {d.q3_spend_kshm}M</td>
+                    <td className="py-3 pr-4 text-ink-muted">{d.absorption_rate}%</td>
+                    <td className="py-3 pr-4">
+                      <Badge tone={d.status === 'On Track' ? 'good' : d.status === 'Behind' ? 'watch' : 'risk'}>{d.status}</Badge>
+                    </td>
+                  </>
+                )}
+              />
+            </Card>
 
-          <Card className="p-6">
-            <h3 className="font-serif font-semibold text-lg mb-4">Auditor-General findings, county departments</h3>
-            <p className="text-3xl font-serif font-semibold text-ink">{countyFindings.length}</p>
-            <p className="text-sm text-ink-muted mt-1">Open audit findings across county departments</p>
-          </Card>
+            <Card className="p-6">
+              <h3 className="font-serif font-semibold text-lg mb-4">Auditor-General findings, county departments</h3>
+              <p className="text-3xl font-serif font-semibold text-ink">{countyFindings.length}</p>
+              <p className="text-sm text-ink-muted mt-1">Open audit findings across county departments</p>
+            </Card>
           </>
-        </div>
+        )}
   )
 }
