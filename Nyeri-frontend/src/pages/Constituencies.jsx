@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
-import { Card, Badge } from '../components/ui'
-import { Breadcrumbs, EmptyState } from '../components/DataDisplay'
+import { Card, Badge, EmptyState } from '../components/ui'
+import { Breadcrumbs } from '../components/DataDisplay'
 import APIService from '../services/api'
 import { useAsyncData, Skeleton, AsyncContent } from '../hooks/useAsyncData.jsx'
 
