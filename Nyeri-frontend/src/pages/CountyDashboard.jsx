@@ -74,16 +74,6 @@ export default function CountyDashboard() {
   ]
 
   // Transform county finances data to match expected format if needed
-  // const countyFindings = auditFindings.filter((f) => f.entityType === 'department')
-  //const isSourcesRow = (f) => f.category?.trim().startsWith('Sources')
-  //const countyFindings = auditFindings.filter((f) => !isSourcesRow(f))
-  // Default development vs recurrent if API doesn't return expected format
-  const developmentVsRecurrent = countyFinances?.developmentVsRecurrent || [
-    { fy: '2023/24', development: 2.6, recurrent: 4.3 },
-    { fy: '2024/25', development: 2.9, recurrent: 4.3 },
-    { fy: '2025/26', development: 1.4, recurrent: 2.2 },
-  ]
-  // Transform county finances data to match expected format if needed
 const isSourcesRow = (f) => f.category?.trim().startsWith('Sources')
 const countyFindings = auditFindings.filter((f) => !isSourcesRow(f))
 
