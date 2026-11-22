@@ -25,6 +25,8 @@ export function useAsyncData(key, fetcher, options = {}) {
   const cacheRef = useRef(new Map())
   const abortRef = useRef(null)
   const mountedRef = useRef(true)
+  const fetcherRef = useRef(fetcher)
+  fetcherRef.current = fetcher
 
   // Cleanup on unmount
   useEffect(() => {
@@ -58,7 +60,7 @@ export function useAsyncData(key, fetcher, options = {}) {
     let attempt = 0
     while (attempt <= retry) {
       try {
-        const result = await fetcher(controller.signal)
+        const result = await fetcherRef.current(controller.signal)
 
         if (!mountedRef.current) return null
         if (controller.signal.aborted) return null
@@ -87,7 +89,7 @@ export function useAsyncData(key, fetcher, options = {}) {
         else setIsRefreshing(false)
       }
     }
-  }, [key, fetcher, cacheTime, retry, retryDelay, onSuccess, onError])
+  }, [key, cacheTime, retry, retryDelay, onSuccess, onError])
 
   // Initial fetch
   useEffect(() => {
