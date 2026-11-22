@@ -66,43 +66,7 @@ export default function CountyDashboard() {
         .sort((a, b) => a.fy.localeCompare(b.fy))
     : []
 
-  // Default development vs recurrent if API doesn't return expected format
-  const developmentVsRecurrent = countyFinances?.developmentVsRecurrent || [
-    { fy: '2023/24', development: 2.6, recurrent: 4.3 },
-    { fy: '2024/25', development: 2.9, recurrent: 4.3 },
-    { fy: '2025/26', development: 1.4, recurrent: 2.2 },
-  ]
-
-  // Transform county finances data to match expected format if needed
-const isSourcesRow = (f) => f.category?.trim().startsWith('Sources')
-const countyFindings = auditFindings.filter((f) => !isSourcesRow(f))
-
-// countyFinances is now pivoted: array of { financial_year, equitable_share_kshb, conditional_grants_kshb, osr_kshb, ... }
-const latestFy = countyFinances?.length
-  ? [...new Set(countyFinances.map((f) => f.financial_year))].sort().slice(-1)[0]
-  : null
-
-const latestRevenue = countyFinances
-  ? countyFinances.find((f) => f.financial_year === latestFy)
-  : null
-
-const equitableShare = latestRevenue?.equitable_share_kshb || 0
-const conditionalGrants = latestRevenue?.conditional_grants_kshb || 0
-const ownSourceRevenue = latestRevenue?.osr_kshb || 0
-const totalRevenue = equitableShare + conditionalGrants + ownSourceRevenue
-
-// Revenue-by-source trend across all fiscal years (real data from pivoted API response)
-const revenueByYear = countyFinances
-  ? countyFinances
-      .map((f) => ({
-        fy: f.financial_year,
-        'Equitable Share': f.equitable_share_kshb || 0,
-        'Conditional Grants': f.conditional_grants_kshb || 0,
-        'Own Source Revenue': f.osr_kshb || 0,
-      }))
-      .sort((a, b) => a.fy.localeCompare(b.fy))
-  : []
-
+  
   return (
     <div className="max-w-content mx-auto px-4 sm:px-6 py-8">
       <Breadcrumbs items={[{ label: 'County' }]} />
