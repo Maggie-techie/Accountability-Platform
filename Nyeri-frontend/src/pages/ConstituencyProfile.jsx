@@ -240,17 +240,11 @@ export default function ConstituencyProfile() {
     )
   }
 
-  // Ensure we have at least some allocation trend data for the chart
+  // Use the chartData built from API response (see fetchData function above)
+  // The chartData variable is already set in the fetchData function based on allocationsResponse
+
   // Determine the constituency key for chart data (matches allocationTrend format)
   const constituencyChartKey = constituency.name === 'Mukurwe-ini' ? 'Mukurwe-ini' : constituency.name
-
-  // Ensure we have at least some allocation trend data for the chart
-  const chartData = allocationTrend.length > 0 ? allocationTrend : [
-    { fy: '2022/23', [constituencyChartKey]: constituency.totalAllocationKshm || 0 },
-    { fy: '2023/24', [constituencyChartKey]: constituency.totalAllocationKshm || 0 },
-    { fy: '2024/25', [constituencyChartKey]: constituency.totalAllocationKshm || 0 },
-    { fy: '2025/26', [constituencyChartKey]: constituency.totalAllocationKshm || 0 }
-  ]
 
   // Filter findings and anomalies for this constituency (though they should already be filtered by backend)
   const findings = auditFindings

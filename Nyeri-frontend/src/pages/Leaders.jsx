@@ -4,10 +4,15 @@ import { Card, Badge, Button } from '../components/ui'
 import { SearchBar, Select, FilterBar } from '../components/Filters'
 import { Breadcrumbs, Pagination, usePagination } from '../components/DataDisplay'
 import { EmptyState } from '../components/ui'
-import { scoreCategory } from '../data/mockData'
 import { LEADER_PHOTOS } from '../utils/leaderPhotos'
 import APIService from '../services/api'
 import { useAsyncData, Skeleton, AsyncContent } from '../hooks/useAsyncData.jsx'
+
+function scoreCategory(score) {
+  if (score >= 75) return { label: 'Strong', tone: 'good' }
+  if (score >= 55) return { label: 'Moderate', tone: 'watch' }
+  return { label: 'Needs Attention', tone: 'risk' }
+}
 
 export default function Leaders() {
   const [params] = useSearchParams()

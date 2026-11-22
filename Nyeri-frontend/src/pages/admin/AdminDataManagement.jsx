@@ -224,9 +224,11 @@ function AdminDataManagementInner({ entity }) {
         let rows = []
 
         if (entity === 'leaders') {
-          const [govResult, constResult] = await Promise.allSettled([
+          // Fetch governor and constituencies first
+          const [govResult, constResult, govScoreResult] = await Promise.allSettled([
             getJson('/governor/'),
             getJson('/constituency/'),
+            getJson('/governor/score'),
           ])
 
           if (govResult.status === 'rejected' && constResult.status === 'rejected') {
@@ -236,12 +238,11 @@ function AdminDataManagementInner({ entity }) {
           const failed = []
 
           let governors = []
+          let governorScore = null
           if (govResult.status === 'fulfilled') {
             const v = govResult.value
-            // Handle response that may be wrapped in { data: ... } or direct
             const govData = v?.data ?? v
             governors = toArray(govData, 'governors', 'governor')
-            // A single-governor endpoint may return one object instead of a list
             if (governors.length === 0 && govData && typeof govData === 'object' && !Array.isArray(govData) && Object.keys(govData).length) {
               governors = [govData]
             }
@@ -249,14 +250,18 @@ function AdminDataManagementInner({ entity }) {
             failed.push('governor')
           }
 
+          // Fetch governor score
+          if (govScoreResult.status === 'fulfilled') {
+            const v = govScoreResult.value
+            const scoreData = v?.data ?? v
+            governorScore = scoreData?.score ?? null
+          }
+
           let constituencies = []
           if (constResult.status === 'fulfilled') {
             const v = constResult.value
-            // Handle response that may be wrapped in { data: ... } or direct
             const constData = v?.data ?? v
-            // Try multiple possible keys for constituencies array
             constituencies = toArray(constData, 'constituencies', 'data', 'results') || []
-            // If still empty and constData is an array, use it directly
             if (constituencies.length === 0 && Array.isArray(constData)) {
               constituencies = constData
             }
@@ -266,17 +271,41 @@ function AdminDataManagementInner({ entity }) {
 
           if (failed.length) setWarning(`Could not load: ${failed.join(', ')}.`)
 
+          // Fetch MP scores in parallel for each constituency
+          const constituencyScores = {}
+          if (constituencies.length > 0) {
+            const scorePromises = constituencies
+              .filter(c => c?.slug)
+              .map(c => getJson(`/constituency/${c.slug}/score`)
+                .then(res => ({ slug: c.slug, score: (res?.data ?? res)?.score }))
+                .catch(() => ({ slug: c.slug, score: null }))
+              )
+            const scoreResults = await Promise.all(scorePromises)
+            scoreResults.forEach(r => {
+              if (r.slug && r.score != null) {
+                constituencyScores[r.slug] = r.score
+              }
+            })
+          }
+
           rows = [
-            ...governors.map(normalizeGovernor),
+            ...governors.map((g, i) => {
+              const n = normalizeGovernor(g, i)
+              return {
+                ...n,
+                score: governorScore ?? n.score,
+              }
+            }),
             ...constituencies.map((c, i) => {
               const n = normalizeConstituency(c, i)
+              const fetchedScore = constituencyScores[c?.slug] ?? n.score
               return {
                 _key: `mp-${n._key}`,
                 name: n.mp,
                 position: 'MP',
                 party: n.party,
                 place: n.name,
-                score: n.score,
+                score: fetchedScore,
               }
             }),
           ]

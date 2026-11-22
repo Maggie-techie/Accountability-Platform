@@ -1,8 +1,7 @@
 # Nyeri Accountability Platform — Frontend
 
 React + Vite frontend for the AI-Powered Nyeri Governance Accountability Platform.
-All 19 screens from the design brief are implemented with mock data, ready to be
-wired up to the real Flask API.
+All screens are now wired to the real Flask API (no mock data).
 
 ## Styling Updates
 
@@ -39,22 +38,24 @@ src/
   layouts/        PublicLayout (navbar+footer) and AdminLayout (sidebar)
   pages/          One file per public screen
   pages/admin/    One file per admin screen
-  data/           mockData.js - stands in for the Flask API responses
+  services/       API service layer (src/services/api.js)
+  hooks/          Custom React hooks (useAsyncData, etc.)
   App.jsx         All routes
   main.jsx        Entry point
 ```
 
-## Connecting to the real backend
+## API Integration
 
-Every page currently imports data from `src/data/mockData.js`. To connect to
-your Flask API:
+All pages now fetch data from the Flask API via `src/services/api.js`:
+- Constituencies, allocations, audit findings, and scores
+- Governor profile, county finances, departments
+- AI-powered anomalies (MP AI, GNN, Governor risk analysis)
+- PDF report generation
 
-1. Add a `.env` file with `VITE_API_URL=http://localhost:5000`
-2. Replace the imports from `mockData.js` in each page with `fetch(...)` calls
-   to your Flask endpoints (e.g. `fetch(`${import.meta.env.VITE_API_URL}/constituency`)`)
-3. The shape of the mock data objects in `mockData.js` is designed to match
-   what your MongoDB collections look like, so the fields should line up
-   closely with what your API already returns.
+Configure the API base URL via `.env`:
+```
+VITE_API_BASE_URL=http://localhost:5000/api
+```
 
 ## Building for production
 
