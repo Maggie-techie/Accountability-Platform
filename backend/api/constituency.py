@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 from api.database.connection import get_db
 from datetime import datetime
+from api.cache_middleware import cached, clear_cache
 
 constituency_bp = Blueprint("constituency", __name__)
 
@@ -88,6 +89,7 @@ def calculate_constituency_score(allocations, audit_findings, mp_data=None):
 
 
 @constituency_bp.route("/<slug>/score", methods=["GET"])
+@cached(ttl=600, key_prefix="constituency_score")
 def get_constituency_score(slug):
     """Get accountability score for a specific constituency."""
     try:
@@ -118,8 +120,9 @@ def get_constituency_score(slug):
     except Exception as e:
         return jsonify({"error": "Failed to calculate constituency score", "details": str(e)}), 500
 
-# Constituency endpoints
+# Constituency endpoints - cached for 10 minutes
 @constituency_bp.route("/", methods=["GET"])
+@cached(ttl=600, key_prefix="constituencies")
 def get_constituencies():
     """
     Get all constituencies with optional filtering
@@ -174,6 +177,7 @@ def get_constituencies():
         return jsonify({"error": "Failed to retrieve constituencies", "details": str(e)}), 500
 
 @constituency_bp.route("/<slug>", methods=["GET"])
+@cached(ttl=600, key_prefix="constituency")
 def get_constituency_by_slug(slug):
     """
     Get a specific constituency by its slug
@@ -193,8 +197,9 @@ def get_constituency_by_slug(slug):
     except Exception as e:
         return jsonify({"error": "Failed to retrieve constituency", "details": str(e)}), 500
 
-# Allocations endpoints
+# Allocations endpoints - cached for 10 minutes
 @constituency_bp.route("/allocations", methods=["GET"])
+@cached(ttl=600, key_prefix="allocations")
 def get_allocations():
     """
     Get all allocation records with optional filtering
@@ -248,6 +253,7 @@ def get_allocations():
         return jsonify({"error": "Failed to retrieve allocations", "details": str(e)}), 500
 
 @constituency_bp.route("/allocations/<slug>", methods=["GET"])
+@cached(ttl=600, key_prefix="allocations")
 def get_allocations_by_constituency(slug):
     """
     Get allocation records for a specific constituency
@@ -272,8 +278,9 @@ def get_allocations_by_constituency(slug):
     except Exception as e:
         return jsonify({"error": "Failed to retrieve allocations for constituency", "details": str(e)}), 500
 
-# Audit Findings endpoints
+# Audit Findings endpoints - cached for 5 minutes
 @constituency_bp.route("/audit", methods=["GET"])
+@cached(ttl=300, key_prefix="audit_findings")
 def get_audit_findings():
     """
     Get all audit findings with optional filtering
@@ -327,6 +334,7 @@ def get_audit_findings():
         return jsonify({"error": "Failed to retrieve audit findings", "details": str(e)}), 500
 
 @constituency_bp.route("/audit/<slug>", methods=["GET"])
+@cached(ttl=300, key_prefix="audit_findings")
 def get_audit_findings_by_constituency(slug):
     """
     Get audit findings for a specific constituency
@@ -351,8 +359,9 @@ def get_audit_findings_by_constituency(slug):
     except Exception as e:
         return jsonify({"error": "Failed to retrieve audit findings for constituency", "details": str(e)}), 500
 
-# MPs endpoints
+# MPs endpoints - cached for 10 minutes
 @constituency_bp.route("/mps", methods=["GET"])
+@cached(ttl=600, key_prefix="mps")
 def get_mps():
     """
     get all MP records with optional filtering
@@ -411,6 +420,7 @@ def get_mps():
         return jsonify({"error": "Failed to retrieve MPs", "details": str(e)}), 500
 
 @constituency_bp.route("/mps/<slug>", methods=["GET"])
+@cached(ttl=600, key_prefix="mp")
 def get_mp_by_constituency(slug):
     """
     Get MP data for a specific constituency

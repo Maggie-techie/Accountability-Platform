@@ -1,6 +1,6 @@
 import { Search, SlidersHorizontal } from 'lucide-react'
 
-export function SearchBar({ value, onChange, placeholder = 'Search…', size = 'md' }) {
+export function SearchBar({ value, onChange, placeholder = 'Search…', size = 'md', disabled = false }) {
   const sizes = { md: 'py-2.5 text-sm', lg: 'py-4 text-base' }
   return (
     <div className="relative w-full">
@@ -9,7 +9,8 @@ export function SearchBar({ value, onChange, placeholder = 'Search…', size = '
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        className={`w-full rounded-md border border-line bg-white pl-11 pr-4 ${sizes[size]} outline-none focus:border-forest-600 focus:ring-1 focus:ring-forest-600`}
+        disabled={disabled}
+        className={`w-full rounded-md border border-line bg-white pl-11 pr-4 ${sizes[size]} outline-none focus:border-forest-600 focus:ring-1 focus:ring-forest-600 ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
       />
     </div>
   )

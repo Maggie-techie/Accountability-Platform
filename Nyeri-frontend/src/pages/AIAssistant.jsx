@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { Send, Sparkles, Bot, User, FileText } from 'lucide-react'
 import { Card, Badge, Button } from '../components/ui'
@@ -8,12 +8,139 @@ import APIService from '../services/api'
 
 // Suggested questions
 const suggested = [
+  "Who is the MP for Kieni?",
+  "Who is the Governor of Nyeri County?",
+  "List all MPs in Nyeri County",
+  "What is the budget for Othaya constituency?",
+  "Audit findings for Mathira",
+  "Nyeri County budget breakdown",
   "What was Nyeri County's development expenditure?",
   'What are the major audit findings?',
   'Which constituencies have unusual expenditure patterns?',
   'How did departmental budget absorption change?',
   "Explain this leader's accountability score.",
 ]
+
+// Helper function to handle simple factual questions directly from the database
+async function handleSimpleQuestion(question) {
+  const lowerQuestion = question.toLowerCase()
+  const constituencies = [
+    { name: 'Kieni', slug: 'kieni' },
+    { name: 'Mathira', slug: 'mathira' },
+    { name: 'Othaya', slug: 'othaya' },
+    { name: 'Tetu', slug: 'tetu' },
+    { name: 'Mukurwe-ini', slug: 'mukurweini' },
+    { name: 'Nyeri Town', slug: 'nyeri_town' },
+  ]
+
+  // 1. Who is the MP / leader of [constituency]?
+  const mpMatch = lowerQuestion.match(/(?:who is the (?:mp|member of parliament|leader|representative) of|who represents|mp (?:for|of))\s+([a-z\s\-]+)/i)
+  if (mpMatch) {
+    const query = mpMatch[1].trim().toLowerCase().replace(/\s+/g, '_').replace(/-/, '')
+    const matched = constituencies.find(c => c.slug === query || c.name.toLowerCase() === query)
+    if (matched) {
+      const mpData = await APIService.getMPByConstituency(matched.slug)
+      if (mpData?.name) {
+        return {
+          answer: `The Member of Parliament for ${matched.name} Constituency is **${mpData.name}** (${mpData.party || 'Party not specified'}).`,
+          figures: [],
+          related: [{ label: `${matched.name} Profile`, to: `/constituencies/${matched.slug}` }],
+          sources: ['NG-CDF Board / Constituency Records']
+        }
+      }
+    }
+    return { answer: `I couldn't find an MP for "${mpMatch[1]}". Please check the constituency name.`, figures: [], related: [], sources: [] }
+  }
+
+  // 2. Who is the governor?
+  if (lowerQuestion.includes('who is the governor') || lowerQuestion === 'governor' || lowerQuestion.includes('county governor')) {
+    const govData = await APIService.getGovernorProfile()
+    if (govData?.name) {
+      return {
+        answer: `The Governor of Nyeri County is **${govData.name}** (${govData.party || 'Party not specified'}), serving since ${govData.tenure || 'tenure not specified'}.`,
+        figures: [],
+        related: [{ label: 'Governor Profile', to: `/leaders/${govData.id || govData._id}` }, { label: 'County Dashboard', to: '/county' }],
+        sources: ['County Government Records']
+      }
+    }
+    return { answer: 'Unable to fetch governor information at the moment.', figures: [], related: [], sources: [] }
+  }
+
+  // 3. List all MPs / leaders
+  if (lowerQuestion.includes('list all') && (lowerQuestion.includes('mp') || lowerQuestion.includes('member of parliament') || lowerQuestion.includes('leaders'))) {
+    const allScores = await APIService.getAllConstituencyScores()
+    const leaders = allScores.map(c => `• ${c.mp?.name} — ${c.name} Constituency (${c.mp?.party || 'Party not specified'})`).join('\n')
+    return {
+      answer: `**Nyeri County Members of Parliament:**\n${leaders}`,
+      figures: [],
+      related: [{ label: 'All Leaders', to: '/leaders' }],
+      sources: ['NG-CDF Board / Constituency Records']
+    }
+  }
+
+  // 4. What is the allocation for [constituency]?
+  const allocMatch = lowerQuestion.match(/(?:allocation|budget|funding|ng.?cdf).*(?:for|of)\s+([a-z\s\-]+)/i)
+  if (allocMatch) {
+    const query = allocMatch[1].trim().toLowerCase().replace(/\s+/g, '_').replace(/-/, '')
+    const matched = constituencies.find(c => c.slug === query || c.name.toLowerCase() === query)
+    if (matched) {
+      const allocData = await APIService.getConstituencyAllocations(matched.slug)
+      if (allocData?.allocations?.length) {
+        const latest = allocData.allocations.sort((a, b) => (b.fy_key || '').localeCompare(a.fy_key || ''))[0]
+        const total = allocData.allocations.reduce((sum, a) => sum + (a.amount_kshm || 0), 0)
+        return {
+          answer: `**${matched.name} Constituency NG-CDF Allocation:**\nLatest FY (${latest?.fy_key || 'N/A'}): KSh ${latest?.amount_kshm?.toLocaleString() || 0}M\nAll-time total: KSh ${total.toLocaleString()}M`,
+          figures: [{ label: 'Latest FY Allocation', value: `KSh ${latest?.amount_kshm || 0}M` }, { label: 'Total Allocation', value: `KSh ${total}M` }],
+          related: [{ label: `${matched.name} Profile`, to: `/constituencies/${matched.slug}` }],
+          sources: ['NG-CDF Board Disbursement Records']
+        }
+      }
+    }
+    return { answer: `I couldn't find allocation data for "${allocMatch[1]}".`, figures: [], related: [], sources: [] }
+  }
+
+  // 5. What are the audit findings for [constituency]?
+  const auditMatch = lowerQuestion.match(/(?:audit findings|findings).*(?:for|of)\s+([a-z\s\-]+)/i)
+  if (auditMatch) {
+    const query = auditMatch[1].trim().toLowerCase().replace(/\s+/g, '_').replace(/-/, '')
+    const matched = constituencies.find(c => c.slug === query || c.name.toLowerCase() === query)
+    if (matched) {
+      const auditData = await APIService.getConstituencyAuditFindings(matched.slug)
+      const findings = auditData?.audit_findings || auditData || []
+      if (findings.length) {
+        const misap = findings.filter(f => f.finding_type === 'misappropriation' || f.finding_type === 'Misappropriation')
+        return {
+          answer: `**${matched.name} Constituency Audit Findings:**\nTotal findings: ${findings.length}\nMisappropriation findings: ${misap.length}\n\n${findings.slice(0, 3).map(f => `• ${f.finding_type || 'Finding'}: ${f.finding || f.note || 'No details'}`).join('\n')}${findings.length > 3 ? '\n...and more' : ''}`,
+          figures: [{ label: 'Total Findings', value: findings.length }, { label: 'Misappropriations', value: misap.length }],
+          related: [{ label: `${matched.name} Profile`, to: `/constituencies/${matched.slug}` }, { label: 'All Anomalies', to: '/anomalies' }],
+          sources: ['Office of the Auditor-General Reports']
+        }
+      }
+    }
+    return { answer: `No audit findings found for "${auditMatch[1]}".`, figures: [], related: [], sources: [] }
+  }
+
+  // 6. County budget / finances
+  if (lowerQuestion.includes('county budget') || lowerQuestion.includes('county finances') || lowerQuestion.includes('county revenue')) {
+    const finances = await APIService.getCountyFinances()
+    if (finances?.length) {
+      const latest = finances.sort((a, b) => (b.financial_year || '').localeCompare(a.financial_year || ''))[0]
+      const sources = []
+      if (latest.equitable_share_kshb) sources.push(`Equitable Share: KSh ${latest.equitable_share_kshb}B`)
+      if (latest.conditional_grants_kshb) sources.push(`Conditional Grants: KSh ${latest.conditional_grants_kshb}B`)
+      if (latest.osr_kshb) sources.push(`Own Source Revenue: KSh ${latest.osr_kshb}B`)
+      return {
+        answer: `**Nyeri County Finances (${latest?.financial_year || 'Latest FY'}):**\n${sources.join('\n')}`,
+        figures: sources.map(s => ({ label: s.split(':')[0], value: s.split(':')[1].trim() })),
+        related: [{ label: 'County Dashboard', to: '/county' }],
+        sources: ['Nyeri County Fiscal Reports / National Treasury']
+      }
+    }
+    return { answer: 'Unable to fetch county finances at the moment.', figures: [], related: [], sources: [] }
+  }
+
+  return null // Not a simple question
+}
 
 // Helper function to determine which AI endpoint to call based on the question
 function getAIEndpointAndParams(question) {
@@ -183,14 +310,22 @@ function formatAIResponse(aiData, question) {
 
 export default function AIAssistant() {
   const [params] = useSearchParams()
-  const about = params.get('about')
+  const about = params.get(‘about’)
   const [messages, setMessages] = useState(
     about
-      ? [{ role: 'assistant', type: 'text', content: `You're asking about ${about}. Try a specific question below, e.g. "Explain ${about}'s accountability score."` }]
-      : [{ role: 'assistant', type: 'text', content: 'Ask me anything about Nyeri County governance data — budgets, NG-CDF, audits or anomalies. I answer only in English, using the platform’s verified records.' }]
+      ? [{ role: ‘assistant’, type: ‘text’, content: `You’re asking about ${about}. Try a specific question below, e.g. "Explain ${about}’s accountability score."` }]
+      : [{ role: ‘assistant’, type: ‘text’, content: ‘Ask me anything about Nyeri County governance data — budgets, NG-CDF, audits or anomalies. I answer only in English, using the platform’s verified records.’ }]
   )
-  const [input, setInput] = useState('')
+  const [input, setInput] = useState(‘’)
   const [loading, setLoading] = useState(false)
+
+  // Ref for the messages container to enable auto-scroll
+  const messagesEndRef = useRef(null)
+
+  // Auto-scroll to bottom when messages change
+  useEffect(() => {
+    messagesEndRef.current?.scrollIntoView({ behavior: ‘smooth’ })
+  }, [messages])
 
   function ask(question) {
     // Add user message to chat
@@ -198,24 +333,29 @@ export default function AIAssistant() {
     setInput('')
     setLoading(true)
 
-    // Determine which AI endpoint to call
-    const { endpoint, params: aiParams, method } = getAIEndpointAndParams(question)
-
-    // Make the API call
-    const fetchAIData = async () => {
+    // First, try to handle simple factual questions directly
+    const fetchAnswer = async () => {
       try {
+        // Check for simple questions we can answer from the database
+        const simpleAnswer = await handleSimpleQuestion(question)
+        if (simpleAnswer) {
+          setMessages((m) => [...m, { role: 'assistant', type: 'answer', data: { ...simpleAnswer, question } }])
+          setLoading(false)
+          return
+        }
+
+        // Otherwise, use AI endpoints for analytical questions
+        const { endpoint, params: aiParams, method } = getAIEndpointAndParams(question)
+
         let response
 
         if (method === 'POST') {
           // For POST requests, we need to send data in the body
-          // This is simplified - in reality we'd need to extract more specific params from the question
           response = await fetch(`${APIService.baseURL}${endpoint}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-              // Extract any specific IDs or parameters from the question
               ...aiParams,
-              // Add question context for the AI
               question_context: question
             })
           })
@@ -316,6 +456,8 @@ export default function AIAssistant() {
                   )}
                 </div>
               ))}
+              {/* Sentinel div for auto-scroll */}
+              <div ref={messagesEndRef} />
             </div>
             <div className="border-t border-line p-3">
               <form

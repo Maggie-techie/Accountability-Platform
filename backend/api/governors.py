@@ -1,6 +1,7 @@
 from flask import Blueprint, jsonify, request
 from api.database.connection import get_db
 from datetime import datetime
+from api.cache_middleware import cached, invalidate_on_write, clear_cache
 
 governor_bp = Blueprint("governor", __name__)
 
@@ -18,9 +19,9 @@ def serializable_single(doc):
     return doc
 
 
-# GOVERNOR PROFILE
-
+# GOVERNOR PROFILE - cached for 10 minutes, auto-invalidated on writes
 @governor_bp.route("/", methods=["GET"])
+@cached(ttl=600, key_prefix="governor")
 def get_governor():
     try:
         db = get_db()
@@ -35,8 +36,9 @@ def get_governor():
     except Exception as e:
         return jsonify({"error": "Failed to retrieve governor profile", "details": str(e)}), 500
 
-# get county finances
+# get county finances - cached for 10 minutes
 @governor_bp.route("/finances", methods=["GET"])
+@cached(ttl=600, key_prefix="governor:finances")
 def get_finances():
     try:
         db = get_db()
@@ -104,8 +106,9 @@ def get_finances():
     except Exception as e:
         return jsonify({"error": "Failed to retrieve finances", "details": str(e)}), 500
 
-# get departments data
+# get departments data - cached for 10 minutes
 @governor_bp.route("/departments", methods=["GET"])
+@cached(ttl=600, key_prefix="governor:departments")
 def get_departments():
     try:
         db = get_db()
@@ -115,8 +118,9 @@ def get_departments():
     except Exception as e:
         return jsonify({"error": "Failed to retrieve departments", "details": str(e)}), 500
 
-# get county audit findings
+# get county audit findings - cached for 5 minutes
 @governor_bp.route("/audit", methods=["GET"])
+@cached(ttl=300, key_prefix="governor:audit")
 def get_audit():
     try:
         db = get_db()
@@ -152,6 +156,7 @@ def calculate_score(finance, audit, department):
     return round(score, 2)
 
 @governor_bp.route("/score", methods=["GET"])
+@cached(ttl=600, key_prefix="governor:score")
 def get_score():
     try:
         db = get_db()

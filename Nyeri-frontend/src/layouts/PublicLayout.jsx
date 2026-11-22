@@ -68,7 +68,12 @@ function Dropdown({ group, isMobile = false }) {
   const Icon = group.icon
 
   return (
-    <div ref={dropdownRef} className="relative" onMouseEnter={() => !isMobile && setOpen(true)} onMouseLeave={() => !isMobile && setOpen(false)}>
+    <div
+      ref={dropdownRef}
+      className="relative"
+      onMouseEnter={() => !isMobile && setOpen(true)}
+      onMouseLeave={() => !isMobile && setOpen(false)}
+    >
       <button
         onClick={() => setOpen(!open)}
         className={`flex items-center gap-1.5 px-3 py-2 rounded text-sm font-medium transition-colors ${
@@ -83,7 +88,7 @@ function Dropdown({ group, isMobile = false }) {
       </button>
 
       {open && (
-        <div className={`absolute top-full left-0 mt-1 min-w-[180px] rounded-lg bg-ink border border-line/50 shadow-lg py-1 z-40 ${isMobile ? 'static w-full bg-ink/50 border-t border-line/50 shadow-none mt-0' : ''}`}>
+        <div className={`absolute top-full left-0 min-w-[180px] rounded-lg bg-ink border border-line/50 shadow-lg py-1 z-40 ${isMobile ? 'static w-full bg-ink/50 border-t border-line/50 shadow-none mt-0' : ''}`}>
           {group.items.map((item) => (
             <NavLink
               key={item.to}
