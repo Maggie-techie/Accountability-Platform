@@ -90,6 +90,19 @@ export default function ConstituencyProfile() {
         // We need to transform allocations to match the mock allocationTrend format:
         // [{ fy: '2022/23', Kieni: 165.7, Mathira: 151.9, Othaya: 118.0, Tetu: 131.3, 'Mukurwe-ini': 110.2, 'Nyeri Town': 120.8 }, ...]
 
+        // Helper to convert slug to proper constituency name for chart keys
+        const slugToChartKey = (slug) => {
+          const map = {
+            'kieni': 'Kieni',
+            'mathira': 'Mathira',
+            'othaya': 'Othaya',
+            'tetu': 'Tetu',
+            'mukurweini': 'Mukurwe-ini',
+            'nyeri_town': 'Nyeri Town',
+          }
+          return map[slug] || slug
+        }
+
         if (allocationsResponse && allocationsResponse.allocations) {
           // Group allocations by fiscal year and constituency
           const allocationsByYear = {}
@@ -111,7 +124,9 @@ export default function ConstituencyProfile() {
             const amount = alloc.amount_kshm || alloc.amount || alloc.allocated_amount || 0
 
             if (constituencyIdentifier && constituencyIdentifier !== 'unknown') {
-              allocationsByYear[fy][constituencyIdentifier] = amount
+              // Convert slug to proper chart key
+              const chartKey = slugToChartKey(constituencyIdentifier)
+              allocationsByYear[fy][chartKey] = amount
             }
           })
 

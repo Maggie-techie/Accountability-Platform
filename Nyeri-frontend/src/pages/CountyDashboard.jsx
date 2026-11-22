@@ -66,7 +66,13 @@ export default function CountyDashboard() {
         .sort((a, b) => a.fy.localeCompare(b.fy))
     : []
 
-  
+  // Default development vs recurrent if API doesn't return expected format
+  const developmentVsRecurrent = countyFinances?.developmentVsRecurrent || [
+    { fy: '2023/24', development: 2.6, recurrent: 4.3 },
+    { fy: '2024/25', development: 2.9, recurrent: 4.3 },
+    { fy: '2025/26', development: 1.4, recurrent: 2.2 },
+  ]
+
   return (
     <div className="max-w-content mx-auto px-4 sm:px-6 py-8">
       <Breadcrumbs items={[{ label: 'County' }]} />
