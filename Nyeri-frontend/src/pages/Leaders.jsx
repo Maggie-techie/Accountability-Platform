@@ -14,6 +14,18 @@ function scoreCategory(score) {
   return { label: 'Needs Attention', tone: 'risk' }
 }
 
+function auditStatusTone(status) {
+  if (!status) return 'default'
+  const s = status.toLowerCase()
+  // Unqualified / Clean = good (green)
+  if (s === 'unqualified' || s === 'unqualified*' || s === 'clean') return 'good'
+  // Qualified / Concerning = watch (amber)
+  if (s === 'qualified' || s === 'concerning') return 'watch'
+  // Adverse / Disclaimer = risk (red)
+  if (s === 'adverse' || s === 'disclaimer') return 'risk'
+  return 'default'
+}
+
 export default function Leaders() {
   const [params] = useSearchParams()
   const [q, setQ] = useState(params.get('q') || '')
@@ -53,7 +65,8 @@ export default function Leaders() {
         party: governorData.party,
         place: governorData.county,
         score: governorScore,
-        summary: governorData.summary
+        summary: governorData.summary,
+        auditStatus: governorData.audit_status || governorData.auditStatus
       })
     }
 
@@ -70,6 +83,7 @@ export default function Leaders() {
         place: c.name,
         score: c.accountabilityScore,
         summary: `Oversees NG-CDF allocation of KSh ${totalAllocation.toFixed(1)}M for ${c.name}.`,
+        auditStatus: c.mp?.audit_status || c.mp?.auditStatus || c.auditStatus
       })
     })
 
@@ -205,7 +219,14 @@ export default function Leaders() {
                     </div>
                     <p className="text-sm text-ink-muted flex-1">{l.summary}</p>
                     <div className="flex items-center justify-between mt-4 pt-3 border-t border-line">
-                      <Badge tone={tone}>Score {l.score}</Badge>
+                      <div className="flex items-center gap-2">
+                        <Badge tone={tone}>Score {l.score}</Badge>
+                        {l.auditStatus && (
+                          <Badge tone={auditStatusTone(l.auditStatus)}>
+                            {l.auditStatus}
+                          </Badge>
+                        )}
+                      </div>
                       <Link to={`/leaders/${l.id}`}>
                         <Button size="sm" variant="secondary">View Profile</Button>
                       </Link>

@@ -1,6 +1,6 @@
-import { Server, Database, KeyRound, Users2, Activity } from 'lucide-react'
-import { Card, Badge, Button } from '../../components/ui'
-import { useState, useEffect } from 'react'
+import { Server, Database, KeyRound, Users2, Activity, Plus, X, Loader2 } from 'lucide-react'
+import { Card, Badge, Button, Input, Modal } from '../../components/ui'
+import { useState, useEffect, useCallback } from 'react'
 import APIService from '../../services/api'
 
 export default function SystemManagement() {
@@ -16,11 +16,26 @@ export default function SystemManagement() {
   })
   const [adminUsers, setAdminUsers] = useState([])
   const [securityInfo, setSecurityInfo] = useState({
-    jwtSessionLength: 'Unknown',
-    lastSecretRotation: 'Unknown'
+    jwtSessionLength: 'Long-lived (demo)',
+    lastSecretRotation: 'Not yet rotated'
   })
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [showAddAdminModal, setShowAddAdminModal] = useState(false)
+  const [newAdminEmail, setNewAdminEmail] = useState('')
+  const [addingAdmin, setAddingAdmin] = useState(false)
+  const [addAdminError, setAddAdminError] = useState('')
+
+  const fetchAdminUsers = useCallback(async () => {
+    try {
+      const response = await APIService.getAdminUsers()
+      if (response.success && response.data) {
+        setAdminUsers(response.data)
+      }
+    } catch (err) {
+      console.error('Error fetching admin users:', err)
+    }
+  }, [])
 
   useEffect(() => {
     const fetchSystemData = async () => {
@@ -67,17 +82,8 @@ export default function SystemManagement() {
           }
         }
 
-        // For admin users, we don't have a specific endpoint, so we'll show placeholder info
-        // In a real implementation, this would come from an /api/admin/users endpoint
-        setAdminUsers([
-          { email: 'admin@nyeri-accountability.org', status: 'Active' }
-        ])
-
-        // Set security info based on known configurations
-        setSecurityInfo({
-          jwtSessionLength: 'Long-lived (demo)',
-          lastSecretRotation: 'Not yet rotated'
-        })
+        // Fetch admin users from backend
+        await fetchAdminUsers()
 
         setError(null)
       } catch (err) {
@@ -96,17 +102,64 @@ export default function SystemManagement() {
           totalDocuments: 0
         })
         setAdminUsers([])
-        setSecurityInfo({
-          jwtSessionLength: 'Unknown',
-          lastSecretRotation: 'Unknown'
-        })
       } finally {
         setLoading(false)
       }
     }
 
     fetchSystemData()
-  }, [])
+  }, [fetchAdminUsers])
+
+  const handleAddAdmin = async () => {
+    if (!newAdminEmail.trim()) {
+      setAddAdminError('Email is required')
+      return
+    }
+
+    // Basic email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+    if (!emailRegex.test(newAdminEmail.trim())) {
+      setAddAdminError('Please enter a valid email address')
+      return
+    }
+
+    setAddingAdmin(true)
+    setAddAdminError('')
+
+    try {
+      const response = await APIService.createAdminUser(newAdminEmail.trim())
+      if (response.success) {
+        setShowAddAdminModal(false)
+        setNewAdminEmail('')
+        await fetchAdminUsers() // Refresh the list
+      } else {
+        setAddAdminError(response.error || 'Failed to create admin user')
+      }
+    } catch (err) {
+      console.error('Error creating admin user:', err)
+      setAddAdminError(err.message || 'Failed to create admin user')
+    } finally {
+      setAddingAdmin(false)
+    }
+  }
+
+  const handleDeleteAdmin = async (email) => {
+    if (!window.confirm(`Are you sure you want to remove ${email} as an admin user?`)) {
+      return
+    }
+
+    try {
+      const response = await APIService.deleteAdminUser(email)
+      if (response.success) {
+        await fetchAdminUsers() // Refresh the list
+      } else {
+        alert(response.error || 'Failed to delete admin user')
+      }
+    } catch (err) {
+      console.error('Error deleting admin user:', err)
+      alert(err.message || 'Failed to delete admin user')
+    }
+  }
 
   if (loading) {
     return (
@@ -155,13 +208,28 @@ export default function SystemManagement() {
           <div className="flex items-center gap-2 mb-4"><Users2 size={16} className="text-ink-faint" /><h3 className="font-semibold">Admin users</h3></div>
           <ul className="space-y-2 text-sm">
             {adminUsers.map((user, index) => (
-              <li key={index} className="flex justify-between">
+              <li key={index} className="flex justify-between items-center">
                 <span className="text-ink">{user.email}</span>
-                <Badge tone={user.status === 'Active' ? 'good' : 'risk'}>{user.status}</Badge>
+                <div className="flex items-center gap-2">
+                  <Badge tone={user.status === 'Active' ? 'good' : 'risk'}>{user.status}</Badge>
+                  {adminUsers.length > 1 && (
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => handleDeleteAdmin(user.email)}
+                      className="text-ink-danger hover:text-ink-danger"
+                      aria-label="Remove admin user"
+                    >
+                      <X size={14} />
+                    </Button>
+                  )}
+                </div>
               </li>
             ))}
           </ul>
-          <Button size="sm" variant="secondary" className="mt-4">Add admin user</Button>
+          <Button size="sm" variant="secondary" className="mt-4" onClick={() => setShowAddAdminModal(true)}>
+            <Plus size={14} className="mr-1" /> Add admin user
+          </Button>
         </Card>
 
         <Card className="p-6">
@@ -173,6 +241,42 @@ export default function SystemManagement() {
           <Button size="sm" variant="secondary" className="mt-4">Rotate JWT secret</Button>
         </Card>
       </div>
+
+      {/* Add Admin User Modal */}
+      <Modal
+        isOpen={showAddAdminModal}
+        onClose={() => { setShowAddAdminModal(false); setNewAdminEmail(''); setAddAdminError(''); }}
+        title="Add Admin User"
+      >
+        <div className="space-y-4">
+          <p className="text-ink-muted text-sm">Enter the email address of the new admin user.</p>
+          <Input
+            type="email"
+            value={newAdminEmail}
+            onChange={(e) => { setNewAdminEmail(e.target.value); setAddAdminError(''); }}
+            placeholder="karongo27@gmail.com"
+            disabled={addingAdmin}
+          />
+          {addAdminError && (
+            <p className="text-sm text-ink-danger">{addAdminError}</p>
+          )}
+          <div className="flex justify-end gap-2 pt-2">
+            <Button variant="ghost" onClick={() => { setShowAddAdminModal(false); setNewAdminEmail(''); setAddAdminError(''); }} disabled={addingAdmin}>
+              Cancel
+            </Button>
+            <Button onClick={handleAddAdmin} disabled={addingAdmin}>
+              {addingAdmin ? (
+                <>
+                  <Loader2 size={14} className="mr-1 animate-spin" />
+                  Adding...
+                </>
+              ) : (
+                'Add admin user'
+              )}
+            </Button>
+          </div>
+        </div>
+      </Modal>
     </div>
   )
 }

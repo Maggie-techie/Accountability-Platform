@@ -355,6 +355,99 @@ def admin_import_history():
 
 
 # ---------------------------------------------------------------------------
+# Admin Users Endpoints
+# ---------------------------------------------------------------------------
+@general_bp.route("/admin/users", methods=["GET"])
+def get_admin_users():
+    """Get list of admin users"""
+    try:
+        db = get_db()
+
+        # Check if admin_users collection exists, if not create it
+        if 'admin_users' not in db.list_collection_names():
+            db.create_collection('admin_users')
+            # Create default admin user
+            default_admin = {
+                "email": "karongo27@gmail.com",
+                "status": "Active",
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow()
+            }
+            db.admin_users.insert_one(default_admin)
+
+        users = list(db.admin_users.find({}, {"_id": 0}))
+        return jsonify({"success": True, "data": users, "count": len(users)}), 200
+
+    except Exception as e:
+        logging.exception("Error fetching admin users")
+        return jsonify({"error": "Failed to fetch admin users", "details": str(e)}), 500
+
+
+@general_bp.route("/admin/users", methods=["POST"])
+def create_admin_user():
+    """Create a new admin user"""
+    try:
+        db = get_db()
+        data = request.get_json()
+
+        if not data or 'email' not in data:
+            return jsonify({"error": "Email is required"}), 400
+
+        email = data['email'].strip().lower()
+        if not email:
+            return jsonify({"error": "Email cannot be empty"}), 400
+
+        # Check if user already exists
+        existing = db.admin_users.find_one({"email": email})
+        if existing:
+            return jsonify({"error": "Admin user with this email already exists"}), 409
+
+        # Create new admin user
+        new_user = {
+            "email": email,
+            "status": "Active",
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow()
+        }
+        db.admin_users.insert_one(new_user)
+
+        return jsonify({
+            "success": True,
+            "message": "Admin user created successfully",
+            "data": new_user
+        }), 201
+
+    except Exception as e:
+        logging.exception("Error creating admin user")
+        return jsonify({"error": "Failed to create admin user", "details": str(e)}), 500
+
+
+@general_bp.route("/admin/users/<email>", methods=["DELETE"])
+def delete_admin_user(email):
+    """Delete an admin user"""
+    try:
+        db = get_db()
+
+        # Prevent deleting the last admin user
+        user_count = db.admin_users.count_documents({})
+        if user_count <= 1:
+            return jsonify({"error": "Cannot delete the last admin user"}), 400
+
+        result = db.admin_users.delete_one({"email": email})
+        if result.deleted_count == 0:
+            return jsonify({"error": "Admin user not found"}), 404
+
+        return jsonify({
+            "success": True,
+            "message": "Admin user deleted successfully"
+        }), 200
+
+    except Exception as e:
+        logging.exception("Error deleting admin user")
+        return jsonify({"error": "Failed to delete admin user", "details": str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
 # Dataset Upload Endpoints
 # ---------------------------------------------------------------------------
 def parse_csv_content(content):

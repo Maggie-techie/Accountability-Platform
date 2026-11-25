@@ -62,6 +62,11 @@ export default function Reports() {
           filename = `${constituencySlug}_accountability_report.pdf`
           break
         }
+        case 'county': {
+          blob = await APIService.downloadCountyPDFReport()
+          filename = `nyeri_county_aggregated_accountability_report.pdf`
+          break
+        }
         case 'audit_findings': {
           const response = await fetch(`${APIService.baseURL}/reports/audit/findings`)
           if (!response.ok) {

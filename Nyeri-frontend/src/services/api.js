@@ -454,6 +454,26 @@ class APIService {
     })
     return response.json()
   }
+
+  // =============================================================================
+  // Admin Users
+  // =============================================================================
+  static async getAdminUsers() {
+    return this._authenticatedFetch('/admin/users')
+  }
+
+  static async createAdminUser(email) {
+    return this._authenticatedFetch('/admin/users', {
+      method: 'POST',
+      body: JSON.stringify({ email })
+    })
+  }
+
+  static async deleteAdminUser(email) {
+    return this._authenticatedFetch(`/admin/users/${encodeURIComponent(email)}`, {
+      method: 'DELETE'
+    })
+  }
 }
 
 export default APIService;

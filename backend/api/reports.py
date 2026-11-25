@@ -1662,12 +1662,12 @@ def get_reports():
                 }
             })
 
-        # Get a few constituencies to create constituency report entries
-        constituencies = list(db.constituencies.find().limit(3))
+        # Get ALL constituencies to create constituency report entries
+        constituencies = list(db.constituencies.find())
         for i, constituency in enumerate(constituencies):
             reports_list.append({
                 "id": f"const-{i+1:03d}",
-                "title": f"{constituency.get('name', 'Constituency')} NG-CD Report",
+                "title": f"{constituency.get('name', 'Constituency')} NG-CDF Report",
                 "category": "NG-CDF Reports",
                 "entity": constituency.get('name', 'Unknown Constituency'),
                 "financialYear": "2024/25",
@@ -1699,6 +1699,18 @@ def get_reports():
             "financialYear": "2024/25",
             "datePublished": datetime.now().strftime("%Y-%m-%d"),
             "reportType": "financial_summary",
+            "reportParams": {}
+        })
+
+        # Add county aggregated report (Governor + All Constituencies)
+        reports_list.append({
+            "id": "county-001",
+            "title": "Nyeri County Aggregated Accountability Report",
+            "category": "Accountability Reports",
+            "entity": "Nyeri County",
+            "financialYear": "2024/25",
+            "datePublished": datetime.now().strftime("%Y-%m-%d"),
+            "reportType": "county",
             "reportParams": {}
         })
 
