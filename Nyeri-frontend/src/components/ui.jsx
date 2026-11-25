@@ -1,4 +1,5 @@
 import { AlertTriangle, CheckCircle2, Info, XCircle, Loader2, Inbox, X } from 'lucide-react'
+import { useEffect } from 'react'
 
 export function Button({ variant = 'primary', size = 'md', className = '', children, ...props }) {
   const base = 'inline-flex items-center justify-center gap-2 rounded font-medium transition-colors disabled:opacity-50 disabled:pointer-events-none'
@@ -125,6 +126,104 @@ export function Toast({ type = 'info', message, onClose, duration = 5000 }) {
       <button onClick={onClose} className="ml-2 text-ink-muted hover:text-ink">
         <X size={16} />
       </button>
+    </div>
+  )
+}
+
+export function Modal({ isOpen, onClose, title, children, size = 'md', showClose = true }) {
+  useEffect(() => {
+    if (isOpen) {
+      document.body.style.overflow = 'hidden'
+    }
+    return () => {
+      document.body.style.overflow = 'unset'
+    }
+  }, [isOpen])
+
+  if (!isOpen) return null
+
+  const sizes = {
+    sm: 'max-w-md',
+    md: 'max-w-lg',
+    lg: 'max-w-2xl',
+    xl: 'max-w-4xl',
+    full: 'max-w-full mx-4',
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 animate-fade-in" onClick={onClose}>
+      <div
+        className={`w-full ${sizes[size]} bg-surface border border-ink/20 rounded-lg shadow-xl animate-slide-up`}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between px-6 py-4 border-b border-ink/10">
+          <h3 className="font-semibold text-lg text-ink">{title}</h3>
+          {showClose && (
+            <button onClick={onClose} className="p-1 rounded hover:bg-ink/5 text-ink-muted transition-colors">
+              <XCircle size={20} />
+            </button>
+          )}
+        </div>
+        <div className="p-6">{children}</div>
+      </div>
+    </div>
+  )
+}
+
+export function Input({ label, error, ...props }) {
+  const id = props.id || props.name
+  return (
+    <div className="mb-4">
+      {label && <label htmlFor={id} className="block text-sm font-medium text-ink mb-1">{label}</label>}
+      <input
+        id={id}
+        className={`w-full px-3 py-2 rounded border bg-surface text-ink placeholder-ink-muted transition-colors ${
+          error ? 'border-clay-500 focus:border-clay-500 focus:ring-clay-500/20' : 'border-ink/20 focus:border-forest-500 focus:ring-forest-500/20'
+        }`}
+        {...props}
+      />
+      {error && <p className="mt-1 text-sm text-clay-500">{error}</p>}
+    </div>
+  )
+}
+
+export function Select({ label, options, error, ...props }) {
+  const id = props.id || props.name
+  return (
+    <div className="mb-4">
+      {label && <label htmlFor={id} className="block text-sm font-medium text-ink mb-1">{label}</label>}
+      <select
+        id={id}
+        className={`w-full px-3 py-2 rounded border bg-surface text-ink transition-colors ${
+          error ? 'border-clay-500 focus:border-clay-500 focus:ring-clay-500/20' : 'border-ink/20 focus:border-forest-500 focus:ring-forest-500/20'
+        }`}
+        {...props}
+      >
+        {options.map((opt) => (
+          <option key={opt.value} value={opt.value}>
+            {opt.label}
+          </option>
+        ))}
+      </select>
+      {error && <p className="mt-1 text-sm text-clay-500">{error}</p>}
+    </div>
+  )
+}
+
+export function Textarea({ label, error, rows = 3, ...props }) {
+  const id = props.id || props.name
+  return (
+    <div className="mb-4">
+      {label && <label htmlFor={id} className="block text-sm font-medium text-ink mb-1">{label}</label>}
+      <textarea
+        id={id}
+        rows={rows}
+        className={`w-full px-3 py-2 rounded border bg-surface text-ink placeholder-ink-muted transition-colors resize-none ${
+          error ? 'border-clay-500 focus:border-clay-500 focus:ring-clay-500/20' : 'border-ink/20 focus:border-forest-500 focus:ring-forest-500/20'
+        }`}
+        {...props}
+      />
+      {error && <p className="mt-1 text-sm text-clay-500">{error}</p>}
     </div>
   )
 }

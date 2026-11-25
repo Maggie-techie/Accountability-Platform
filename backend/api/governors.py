@@ -2,8 +2,11 @@ from flask import Blueprint, jsonify, request
 from api.database.connection import get_db
 from datetime import datetime
 from api.cache_middleware import cached, invalidate_on_write, clear_cache
+from bson import ObjectId
+import logging
 
 governor_bp = Blueprint("governor", __name__)
+logger = logging.getLogger(__name__)
 
 
 # creating a function for converting objectid to string
@@ -171,3 +174,383 @@ def get_score():
         }), 200
     except Exception as e:
         return jsonify({"error": "Failed to calculate score", "details": str(e)}), 500
+
+
+# =============================================================================
+# CRUD ENDPOINTS - Governor Profile
+# =============================================================================
+
+@governor_bp.route("/", methods=["POST"])
+@invalidate_on_write("governor")
+def create_governor():
+    """Create a new governor profile"""
+    try:
+        db = get_db()
+        data = request.get_json()
+
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        required_fields = ['name', 'county']
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({"error": f"Missing required field: {field}"}), 400
+
+        # Check if governor profile already exists (assuming single governor)
+        existing = db.county_leaders.find_one({})
+        if existing:
+            return jsonify({"error": "Governor profile already exists. Use PUT to update."}), 409
+
+        data['created_at'] = datetime.utcnow()
+        data['updated_at'] = datetime.utcnow()
+
+        result = db.county_leaders.insert_one(data)
+        data['_id'] = str(result.inserted_id)
+
+        logger.info(f"Created governor profile: {data['name']}")
+        return jsonify(serialize_single(data)), 201
+
+    except Exception as e:
+        logger.error(f"Error creating governor profile: {e}")
+        return jsonify({"error": "Failed to create governor profile", "details": str(e)}), 500
+
+
+@governor_bp.route("/", methods=["PUT"])
+@invalidate_on_write("governor")
+def update_governor():
+    """Update the governor profile"""
+    try:
+        db = get_db()
+        data = request.get_json()
+
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        data['updated_at'] = datetime.utcnow()
+
+        result = db.county_leaders.update_one(
+            {},
+            {"$set": data}
+        )
+
+        if result.matched_count == 0:
+            return jsonify({"error": "Governor profile not found"}), 404
+
+        updated = db.county_leaders.find_one({})
+        logger.info("Updated governor profile")
+        return jsonify(serialize_single(updated)), 200
+
+    except Exception as e:
+        logger.error(f"Error updating governor profile: {e}")
+        return jsonify({"error": "Failed to update governor profile", "details": str(e)}), 500
+
+
+@governor_bp.route("/", methods=["DELETE"])
+@invalidate_on_write("governor")
+def delete_governor():
+    """Delete the governor profile"""
+    try:
+        db = get_db()
+
+        result = db.county_leaders.delete_one({})
+
+        if result.deleted_count == 0:
+            return jsonify({"error": "Governor profile not found"}), 404
+
+        logger.info("Deleted governor profile")
+        return jsonify({"message": "Governor profile deleted successfully"}), 200
+
+    except Exception as e:
+        logger.error(f"Error deleting governor profile: {e}")
+        return jsonify({"error": "Failed to delete governor profile", "details": str(e)}), 500
+
+
+# =============================================================================
+# CRUD ENDPOINTS - County Finances
+# =============================================================================
+
+@governor_bp.route("/finances", methods=["POST"])
+@invalidate_on_write("governor:finances")
+def create_finance():
+    """Create a new county finance record"""
+    try:
+        db = get_db()
+        data = request.get_json()
+
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        required_fields = ['financial_year', 'revenue_source', 'amount_kshb']
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({"error": f"Missing required field: {field}"}), 400
+
+        data['created_at'] = datetime.utcnow()
+        data['updated_at'] = datetime.utcnow()
+
+        result = db.county_finances.insert_one(data)
+        data['_id'] = str(result.inserted_id)
+
+        logger.info(f"Created finance record for {data['financial_year']} - {data['revenue_source']}")
+        return jsonify(serialize_single(data)), 201
+
+    except Exception as e:
+        logger.error(f"Error creating finance record: {e}")
+        return jsonify({"error": "Failed to create finance record", "details": str(e)}), 500
+
+
+@governor_bp.route("/finances/<finance_id>", methods=["PUT"])
+@invalidate_on_write("governor:finances")
+def update_finance(finance_id):
+    """Update a county finance record"""
+    try:
+        db = get_db()
+        data = request.get_json()
+
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        if '_id' in data:
+            del data['_id']
+
+        data['updated_at'] = datetime.utcnow()
+
+        try:
+            obj_id = ObjectId(finance_id)
+        except:
+            return jsonify({"error": "Invalid finance ID"}), 400
+
+        result = db.county_finances.update_one(
+            {"_id": obj_id},
+            {"$set": data}
+        )
+
+        if result.matched_count == 0:
+            return jsonify({"error": "Finance record not found"}), 404
+
+        updated = db.county_finances.find_one({"_id": obj_id})
+        logger.info(f"Updated finance record: {finance_id}")
+        return jsonify(serialize_single(updated)), 200
+
+    except Exception as e:
+        logger.error(f"Error updating finance record: {e}")
+        return jsonify({"error": "Failed to update finance record", "details": str(e)}), 500
+
+
+@governor_bp.route("/finances/<finance_id>", methods=["DELETE"])
+@invalidate_on_write("governor:finances")
+def delete_finance(finance_id):
+    """Delete a county finance record"""
+    try:
+        db = get_db()
+
+        try:
+            obj_id = ObjectId(finance_id)
+        except:
+            return jsonify({"error": "Invalid finance ID"}), 400
+
+        result = db.county_finances.delete_one({"_id": obj_id})
+
+        if result.deleted_count == 0:
+            return jsonify({"error": "Finance record not found"}), 404
+
+        logger.info(f"Deleted finance record: {finance_id}")
+        return jsonify({"message": "Finance record deleted successfully"}), 200
+
+    except Exception as e:
+        logger.error(f"Error deleting finance record: {e}")
+        return jsonify({"error": "Failed to delete finance record", "details": str(e)}), 500
+
+
+# =============================================================================
+# CRUD ENDPOINTS - Departments
+# =============================================================================
+
+@governor_bp.route("/departments", methods=["POST"])
+@invalidate_on_write("governor:departments")
+def create_department():
+    """Create a new department record"""
+    try:
+        db = get_db()
+        data = request.get_json()
+
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        required_fields = ['department', 'financial_year', 'approved_budget_kshm', 'absorption_rate']
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({"error": f"Missing required field: {field}"}), 400
+
+        data['created_at'] = datetime.utcnow()
+        data['updated_at'] = datetime.utcnow()
+
+        result = db.department_absorption.insert_one(data)
+        data['_id'] = str(result.inserted_id)
+
+        logger.info(f"Created department record: {data['department']} for {data['financial_year']}")
+        return jsonify(serialize_single(data)), 201
+
+    except Exception as e:
+        logger.error(f"Error creating department record: {e}")
+        return jsonify({"error": "Failed to create department record", "details": str(e)}), 500
+
+
+@governor_bp.route("/departments/<dept_id>", methods=["PUT"])
+@invalidate_on_write("governor:departments")
+def update_department(dept_id):
+    """Update a department record"""
+    try:
+        db = get_db()
+        data = request.get_json()
+
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        if '_id' in data:
+            del data['_id']
+
+        data['updated_at'] = datetime.utcnow()
+
+        try:
+            obj_id = ObjectId(dept_id)
+        except:
+            return jsonify({"error": "Invalid department ID"}), 400
+
+        result = db.department_absorption.update_one(
+            {"_id": obj_id},
+            {"$set": data}
+        )
+
+        if result.matched_count == 0:
+            return jsonify({"error": "Department record not found"}), 404
+
+        updated = db.department_absorption.find_one({"_id": obj_id})
+        logger.info(f"Updated department record: {dept_id}")
+        return jsonify(serialize_single(updated)), 200
+
+    except Exception as e:
+        logger.error(f"Error updating department record: {e}")
+        return jsonify({"error": "Failed to update department record", "details": str(e)}), 500
+
+
+@governor_bp.route("/departments/<dept_id>", methods=["DELETE"])
+@invalidate_on_write("governor:departments")
+def delete_department(dept_id):
+    """Delete a department record"""
+    try:
+        db = get_db()
+
+        try:
+            obj_id = ObjectId(dept_id)
+        except:
+            return jsonify({"error": "Invalid department ID"}), 400
+
+        result = db.department_absorption.delete_one({"_id": obj_id})
+
+        if result.deleted_count == 0:
+            return jsonify({"error": "Department record not found"}), 404
+
+        logger.info(f"Deleted department record: {dept_id}")
+        return jsonify({"message": "Department record deleted successfully"}), 200
+
+    except Exception as e:
+        logger.error(f"Error deleting department record: {e}")
+        return jsonify({"error": "Failed to delete department record", "details": str(e)}), 500
+
+
+# =============================================================================
+# CRUD ENDPOINTS - County Audit Findings
+# =============================================================================
+
+@governor_bp.route("/audit", methods=["POST"])
+@invalidate_on_write("governor:audit")
+def create_audit_finding():
+    """Create a new county audit finding"""
+    try:
+        db = get_db()
+        data = request.get_json()
+
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        required_fields = ['entity', 'category', 'finding_type', 'fy_display']
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({"error": f"Missing required field: {field}"}), 400
+
+        data['created_at'] = datetime.utcnow()
+        data['updated_at'] = datetime.utcnow()
+
+        result = db.county_audit_findings.insert_one(data)
+        data['_id'] = str(result.inserted_id)
+
+        logger.info(f"Created county audit finding: {data['entity']} - {data['category']}")
+        return jsonify(serialize_single(data)), 201
+
+    except Exception as e:
+        logger.error(f"Error creating audit finding: {e}")
+        return jsonify({"error": "Failed to create audit finding", "details": str(e)}), 500
+
+
+@governor_bp.route("/audit/<audit_id>", methods=["PUT"])
+@invalidate_on_write("governor:audit")
+def update_audit_finding(audit_id):
+    """Update a county audit finding"""
+    try:
+        db = get_db()
+        data = request.get_json()
+
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        if '_id' in data:
+            del data['_id']
+
+        data['updated_at'] = datetime.utcnow()
+
+        try:
+            obj_id = ObjectId(audit_id)
+        except:
+            return jsonify({"error": "Invalid audit finding ID"}), 400
+
+        result = db.county_audit_findings.update_one(
+            {"_id": obj_id},
+            {"$set": data}
+        )
+
+        if result.matched_count == 0:
+            return jsonify({"error": "Audit finding not found"}), 404
+
+        updated = db.county_audit_findings.find_one({"_id": obj_id})
+        logger.info(f"Updated county audit finding: {audit_id}")
+        return jsonify(serialize_single(updated)), 200
+
+    except Exception as e:
+        logger.error(f"Error updating audit finding: {e}")
+        return jsonify({"error": "Failed to update audit finding", "details": str(e)}), 500
+
+
+@governor_bp.route("/audit/<audit_id>", methods=["DELETE"])
+@invalidate_on_write("governor:audit")
+def delete_audit_finding(audit_id):
+    """Delete a county audit finding"""
+    try:
+        db = get_db()
+
+        try:
+            obj_id = ObjectId(audit_id)
+        except:
+            return jsonify({"error": "Invalid audit finding ID"}), 400
+
+        result = db.county_audit_findings.delete_one({"_id": obj_id})
+
+        if result.deleted_count == 0:
+            return jsonify({"error": "Audit finding not found"}), 404
+
+        logger.info(f"Deleted county audit finding: {audit_id}")
+        return jsonify({"message": "Audit finding deleted successfully"}), 200
+
+    except Exception as e:
+        logger.error(f"Error deleting audit finding: {e}")
+        return jsonify({"error": "Failed to delete audit finding", "details": str(e)}), 500

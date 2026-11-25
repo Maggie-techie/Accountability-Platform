@@ -1,9 +1,22 @@
 from flask import Blueprint, request, jsonify
 from api.database.connection import get_db
 from datetime import datetime
-from api.cache_middleware import cached, clear_cache
+from api.cache_middleware import cached, clear_cache, invalidate_on_write
+from bson import ObjectId
+import logging
 
 constituency_bp = Blueprint("constituency", __name__)
+logger = logging.getLogger(__name__)
+
+def serialize_doc(doc):
+    """Convert ObjectId to string for JSON serialization"""
+    if doc and "_id" in doc:
+        doc["_id"] = str(doc["_id"])
+    return doc
+
+def serialize_docs(docs):
+    """Convert ObjectId to string for list of documents"""
+    return [serialize_doc(doc) for doc in docs]
 
 
 # Scoring model for constituencies/MPs
@@ -439,4 +452,387 @@ def get_mp_by_constituency(slug):
 
     except Exception as e:
         return jsonify({"error": "Failed to retrieve MP for constituency", "details": str(e)}), 500
+
+
+# =============================================================================
+# CRUD ENDPOINTS - Constituencies
+# =============================================================================
+
+@constituency_bp.route("/", methods=["POST"])
+@invalidate_on_write("constituencies", "constituency")
+def create_constituency():
+    """Create a new constituency"""
+    try:
+        db = get_db()
+        data = request.get_json()
+
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        # Required fields
+        required_fields = ['name', 'slug', 'county']
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({"error": f"Missing required field: {field}"}), 400
+
+        # Check if slug already exists
+        existing = db.constituencies.find_one({"slug": data['slug']})
+        if existing:
+            return jsonify({"error": "Constituency with this slug already exists"}), 409
+
+        # Add timestamps
+        data['created_at'] = datetime.utcnow()
+        data['updated_at'] = datetime.utcnow()
+
+        result = db.constituencies.insert_one(data)
+        data['_id'] = str(result.inserted_id)
+
+        logger.info(f"Created constituency: {data['slug']}")
+        return jsonify(serialize_doc(data)), 201
+
+    except Exception as e:
+        logger.error(f"Error creating constituency: {e}")
+        return jsonify({"error": "Failed to create constituency", "details": str(e)}), 500
+
+
+@constituency_bp.route("/<slug>", methods=["PUT"])
+@invalidate_on_write("constituencies", "constituency")
+def update_constituency(slug):
+    """Update an existing constituency"""
+    try:
+        db = get_db()
+        data = request.get_json()
+
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        # Don't allow changing slug
+        if 'slug' in data:
+            del data['slug']
+
+        data['updated_at'] = datetime.utcnow()
+
+        result = db.constituencies.update_one(
+            {"slug": slug},
+            {"$set": data}
+        )
+
+        if result.matched_count == 0:
+            return jsonify({"error": "Constituency not found"}), 404
+
+        updated = db.constituencies.find_one({"slug": slug})
+        logger.info(f"Updated constituency: {slug}")
+        return jsonify(serialize_doc(updated)), 200
+
+    except Exception as e:
+        logger.error(f"Error updating constituency: {e}")
+        return jsonify({"error": "Failed to update constituency", "details": str(e)}), 500
+
+
+@constituency_bp.route("/<slug>", methods=["DELETE"])
+@invalidate_on_write("constituencies", "constituency")
+def delete_constituency(slug):
+    """Delete a constituency"""
+    try:
+        db = get_db()
+
+        result = db.constituencies.delete_one({"slug": slug})
+
+        if result.deleted_count == 0:
+            return jsonify({"error": "Constituency not found"}), 404
+
+        logger.info(f"Deleted constituency: {slug}")
+        return jsonify({"message": "Constituency deleted successfully"}), 200
+
+    except Exception as e:
+        logger.error(f"Error deleting constituency: {e}")
+        return jsonify({"error": "Failed to delete constituency", "details": str(e)}), 500
+
+
+# =============================================================================
+# CRUD ENDPOINTS - MPs
+# =============================================================================
+
+@constituency_bp.route("/mps", methods=["POST"])
+@invalidate_on_write("mps", "mp")
+def create_mp():
+    """Create a new MP record"""
+    try:
+        db = get_db()
+        data = request.get_json()
+
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        required_fields = ['name', 'constituency_slug', 'party']
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({"error": f"Missing required field: {field}"}), 400
+
+        # Check if MP already exists for this constituency
+        existing = db.mps.find_one({"constituency_slug": data['constituency_slug']})
+        if existing:
+            return jsonify({"error": "MP for this constituency already exists"}), 409
+
+        data['created_at'] = datetime.utcnow()
+        data['updated_at'] = datetime.utcnow()
+
+        result = db.mps.insert_one(data)
+        data['_id'] = str(result.inserted_id)
+
+        logger.info(f"Created MP: {data['name']} for constituency {data['constituency_slug']}")
+        return jsonify(serialize_doc(data)), 201
+
+    except Exception as e:
+        logger.error(f"Error creating MP: {e}")
+        return jsonify({"error": "Failed to create MP", "details": str(e)}), 500
+
+
+@constituency_bp.route("/mps/<slug>", methods=["PUT"])
+@invalidate_on_write("mps", "mp")
+def update_mp(slug):
+    """Update an MP record"""
+    try:
+        db = get_db()
+        data = request.get_json()
+
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        # Don't allow changing constituency_slug
+        if 'constituency_slug' in data:
+            del data['constituency_slug']
+
+        data['updated_at'] = datetime.utcnow()
+
+        result = db.mps.update_one(
+            {"constituency_slug": slug},
+            {"$set": data}
+        )
+
+        if result.matched_count == 0:
+            return jsonify({"error": "MP not found"}), 404
+
+        updated = db.mps.find_one({"constituency_slug": slug})
+        logger.info(f"Updated MP for constituency: {slug}")
+        return jsonify(serialize_doc(updated)), 200
+
+    except Exception as e:
+        logger.error(f"Error updating MP: {e}")
+        return jsonify({"error": "Failed to update MP", "details": str(e)}), 500
+
+
+@constituency_bp.route("/mps/<slug>", methods=["DELETE"])
+@invalidate_on_write("mps", "mp")
+def delete_mp(slug):
+    """Delete an MP record"""
+    try:
+        db = get_db()
+
+        result = db.mps.delete_one({"constituency_slug": slug})
+
+        if result.deleted_count == 0:
+            return jsonify({"error": "MP not found"}), 404
+
+        logger.info(f"Deleted MP for constituency: {slug}")
+        return jsonify({"message": "MP deleted successfully"}), 200
+
+    except Exception as e:
+        logger.error(f"Error deleting MP: {e}")
+        return jsonify({"error": "Failed to delete MP", "details": str(e)}), 500
+
+
+# =============================================================================
+# CRUD ENDPOINTS - Allocations
+# =============================================================================
+
+@constituency_bp.route("/allocations", methods=["POST"])
+@invalidate_on_write("allocations")
+def create_allocation():
+    """Create a new allocation record"""
+    try:
+        db = get_db()
+        data = request.get_json()
+
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        required_fields = ['constituency_slug', 'fy_key', 'amount_kshm']
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({"error": f"Missing required field: {field}"}), 400
+
+        data['created_at'] = datetime.utcnow()
+        data['updated_at'] = datetime.utcnow()
+
+        result = db.allocations.insert_one(data)
+        data['_id'] = str(result.inserted_id)
+
+        logger.info(f"Created allocation for {data['constituency_slug']} FY {data['fy_key']}")
+        return jsonify(serialize_doc(data)), 201
+
+    except Exception as e:
+        logger.error(f"Error creating allocation: {e}")
+        return jsonify({"error": "Failed to create allocation", "details": str(e)}), 500
+
+
+@constituency_bp.route("/allocations/<allocation_id>", methods=["PUT"])
+@invalidate_on_write("allocations")
+def update_allocation(allocation_id):
+    """Update an allocation record"""
+    try:
+        db = get_db()
+        data = request.get_json()
+
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        # Don't allow changing _id
+        if '_id' in data:
+            del data['_id']
+
+        data['updated_at'] = datetime.utcnow()
+
+        try:
+            obj_id = ObjectId(allocation_id)
+        except:
+            return jsonify({"error": "Invalid allocation ID"}), 400
+
+        result = db.allocations.update_one(
+            {"_id": obj_id},
+            {"$set": data}
+        )
+
+        if result.matched_count == 0:
+            return jsonify({"error": "Allocation not found"}), 404
+
+        updated = db.allocations.find_one({"_id": obj_id})
+        logger.info(f"Updated allocation: {allocation_id}")
+        return jsonify(serialize_doc(updated)), 200
+
+    except Exception as e:
+        logger.error(f"Error updating allocation: {e}")
+        return jsonify({"error": "Failed to update allocation", "details": str(e)}), 500
+
+
+@constituency_bp.route("/allocations/<allocation_id>", methods=["DELETE"])
+@invalidate_on_write("allocations")
+def delete_allocation(allocation_id):
+    """Delete an allocation record"""
+    try:
+        db = get_db()
+
+        try:
+            obj_id = ObjectId(allocation_id)
+        except:
+            return jsonify({"error": "Invalid allocation ID"}), 400
+
+        result = db.allocations.delete_one({"_id": obj_id})
+
+        if result.deleted_count == 0:
+            return jsonify({"error": "Allocation not found"}), 404
+
+        logger.info(f"Deleted allocation: {allocation_id}")
+        return jsonify({"message": "Allocation deleted successfully"}), 200
+
+    except Exception as e:
+        logger.error(f"Error deleting allocation: {e}")
+        return jsonify({"error": "Failed to delete allocation", "details": str(e)}), 500
+
+
+# =============================================================================
+# CRUD ENDPOINTS - Audit Findings
+# =============================================================================
+
+@constituency_bp.route("/audit", methods=["POST"])
+@invalidate_on_write("audit_findings")
+def create_audit_finding():
+    """Create a new audit finding"""
+    try:
+        db = get_db()
+        data = request.get_json()
+
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        required_fields = ['constituency_slug', 'finding_type', 'category']
+        for field in required_fields:
+            if not data.get(field):
+                return jsonify({"error": f"Missing required field: {field}"}), 400
+
+        data['created_at'] = datetime.utcnow()
+        data['updated_at'] = datetime.utcnow()
+
+        result = db.audit_findings.insert_one(data)
+        data['_id'] = str(result.inserted_id)
+
+        logger.info(f"Created audit finding for {data['constituency_slug']}")
+        return jsonify(serialize_doc(data)), 201
+
+    except Exception as e:
+        logger.error(f"Error creating audit finding: {e}")
+        return jsonify({"error": "Failed to create audit finding", "details": str(e)}), 500
+
+
+@constituency_bp.route("/audit/<finding_id>", methods=["PUT"])
+@invalidate_on_write("audit_findings")
+def update_audit_finding(finding_id):
+    """Update an audit finding"""
+    try:
+        db = get_db()
+        data = request.get_json()
+
+        if not data:
+            return jsonify({"error": "No data provided"}), 400
+
+        if '_id' in data:
+            del data['_id']
+
+        data['updated_at'] = datetime.utcnow()
+
+        try:
+            obj_id = ObjectId(finding_id)
+        except:
+            return jsonify({"error": "Invalid finding ID"}), 400
+
+        result = db.audit_findings.update_one(
+            {"_id": obj_id},
+            {"$set": data}
+        )
+
+        if result.matched_count == 0:
+            return jsonify({"error": "Audit finding not found"}), 404
+
+        updated = db.audit_findings.find_one({"_id": obj_id})
+        logger.info(f"Updated audit finding: {finding_id}")
+        return jsonify(serialize_doc(updated)), 200
+
+    except Exception as e:
+        logger.error(f"Error updating audit finding: {e}")
+        return jsonify({"error": "Failed to update audit finding", "details": str(e)}), 500
+
+
+@constituency_bp.route("/audit/<finding_id>", methods=["DELETE"])
+@invalidate_on_write("audit_findings")
+def delete_audit_finding(finding_id):
+    """Delete an audit finding"""
+    try:
+        db = get_db()
+
+        try:
+            obj_id = ObjectId(finding_id)
+        except:
+            return jsonify({"error": "Invalid finding ID"}), 400
+
+        result = db.audit_findings.delete_one({"_id": obj_id})
+
+        if result.deleted_count == 0:
+            return jsonify({"error": "Audit finding not found"}), 404
+
+        logger.info(f"Deleted audit finding: {finding_id}")
+        return jsonify({"message": "Audit finding deleted successfully"}), 200
+
+    except Exception as e:
+        logger.error(f"Error deleting audit finding: {e}")
+        return jsonify({"error": "Failed to delete audit finding", "details": str(e)}), 500
 
