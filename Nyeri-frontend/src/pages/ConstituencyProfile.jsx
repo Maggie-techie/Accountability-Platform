@@ -58,7 +58,7 @@ export default function ConstituencyProfile() {
     },
     { cacheTime: 10 * 60 * 1000, immediate: !!slug }
   )
-  const anomaliesData = (anomaliesResponse?.success && anomaliesResponse.data) || []
+  const anomaliesData = (anomaliesResponse?.success && anomaliesResponse.data?.narrative_fields?.anomalies) || []
 
   // Process allocations data for chart
   const [allocationTrend, setAllocationTrend] = useState([])
