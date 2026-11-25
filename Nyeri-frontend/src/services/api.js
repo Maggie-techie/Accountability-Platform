@@ -399,6 +399,61 @@ class APIService {
       method: 'DELETE'
     });
   }
+
+  // =============================================================================
+  // Dataset Upload
+  // =============================================================================
+  static async uploadDataset(file, datasetType) {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('dataset_type', datasetType)
+
+    const response = await fetch(`${this.baseURL}/dataset/upload`, {
+      method: 'POST',
+      body: formData
+    })
+    return response.json()
+  }
+
+  static async previewDataset(file, datasetType) {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('dataset_type', datasetType)
+
+    const response = await fetch(`${this.baseURL}/dataset/preview`, {
+      method: 'POST',
+      body: formData
+    })
+    return response.json()
+  }
+
+  static async validateDataset(file, datasetType, county, financialYear) {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('dataset_type', datasetType)
+    formData.append('county', county)
+    formData.append('financial_year', financialYear)
+
+    const response = await fetch(`${this.baseURL}/dataset/validate`, {
+      method: 'POST',
+      body: formData
+    })
+    return response.json()
+  }
+
+  static async importDataset(file, datasetType, county, financialYear) {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('dataset_type', datasetType)
+    formData.append('county', county)
+    formData.append('financial_year', financialYear)
+
+    const response = await fetch(`${this.baseURL}/dataset/import`, {
+      method: 'POST',
+      body: formData
+    })
+    return response.json()
+  }
 }
 
 export default APIService;
