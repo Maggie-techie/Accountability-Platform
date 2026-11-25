@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
 import { useParams, useNavigate, Link } from 'react-router-dom'
 import { LineChart, Line, XAxis, YAxis, Tooltip as RTooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { FileDown, MessageCircleQuestion } from 'lucide-react'
@@ -7,6 +7,7 @@ import { Breadcrumbs, Tabs } from '../components/DataDisplay'
 import { ScoreGauge, AIDisclaimer } from '../components/Insights'
 import { LEADER_PHOTOS } from '../utils/leaderPhotos'
 import APIService from '../services/api'
+import { useSharedAsyncData } from '../hooks/useAsyncData.jsx'
 
 // Governor-specific AI modules, with a readable title for each.
 const GOVERNOR_AI_MODULES = [
@@ -47,25 +48,60 @@ export default function LeaderProfile() {
   const { slug } = useParams()
   const navigate = useNavigate()
   const [tab, setTab] = useState('Verified Source Data')
-
-  const [governorData, setGovernorData] = useState(null)
-  const [constituenciesData, setConstituenciesData] = useState([])
-  const [auditFindings, setAuditFindings] = useState([])
-  const [aiModuleResults, setAiModuleResults] = useState([]) // [{ key, title, narrative_fields, chart_data }]
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [governorScore, setGovernorScore] = useState(null)
-  const [constituencyScore, setConstituencyScore] = useState(null)
-  const [countyFinances, setCountyFinances] = useState(null)
   const [toast, setToast] = useState(null)
 
-  // Compute leader type and constituency early so hooks can use them
+  // Fetch data independently with persistent caching (slug-specific keys)
+  const { data: governorData, isLoading: govLoading, error: govError } = useSharedAsyncData(
+    'governor-profile',
+    () => APIService.getGovernorProfile(),
+    { cacheTime: 10 * 60 * 1000 }
+  )
+
+  const { data: constituenciesResponse, isLoading: constLoading } = useSharedAsyncData(
+    'all-constituencies',
+    () => APIService.getAllConstituencies(),
+    { cacheTime: 10 * 60 * 1000 }
+  )
+  const constituenciesData = constituenciesResponse?.constituencies || constituenciesResponse || []
+
+  const { data: governorScoreResponse, isLoading: govScoreLoading } = useSharedAsyncData(
+    'governor-score',
+    () => APIService.getGovernorScore(),
+    { cacheTime: 10 * 60 * 1000 }
+  )
+  const governorScore = governorScoreResponse?.score
+
+  const { data: countyFinances, isLoading: financeLoading } = useSharedAsyncData(
+    'county-finances',
+    () => APIService.getCountyFinances(),
+    { cacheTime: 10 * 60 * 1000 }
+  )
+
+  // Compute leader type and constituency from fetched data
   const isGovernor = Boolean(
     governorData &&
     slug &&
     (slug === governorData._id || slug === governorData.id)
   )
   const constituency = constituenciesData.find((c) => c.slug === slug || c._id === slug)
+
+  // Fetch constituency score if MP
+  const { data: constituencyScoreResponse, isLoading: constScoreLoading } = useSharedAsyncData(
+    isGovernor ? 'dummy-constituency-score' : `constituency-score-${slug}`,
+    () => isGovernor ? Promise.resolve(null) : APIService.getConstituencyScore(slug).catch(() => null),
+    { cacheTime: 10 * 60 * 1000, immediate: !isGovernor && !!slug }
+  )
+  const constituencyScore = constituencyScoreResponse?.score ?? null
+
+  // Fetch audit findings
+  const { data: auditResponse, isLoading: auditLoading } = useSharedAsyncData(
+    isGovernor ? 'county-audit-findings' : `constituency-audit-${slug}`,
+    () => isGovernor
+      ? APIService.getCountyAuditFindings()
+      : APIService.getConstituencyAuditFindings(slug),
+    { cacheTime: 10 * 60 * 1000 }
+  )
+  const auditFindings = (auditResponse?.audit_findings || auditResponse) || []
 
   // Fetch AI module data - defined inside component to access `slug` from useParams
   const fetchAiModule = useCallback(async (key, isGov) => {
@@ -89,6 +125,23 @@ export default function LeaderProfile() {
       return null
     }
   }, [slug])
+
+  // Fetch AI modules
+  const moduleList = useMemo(() => isGovernor ? GOVERNOR_AI_MODULES : MP_AI_MODULES, [isGovernor])
+
+  const { data: aiModuleResults, isLoading: aiLoading } = useSharedAsyncData(
+    isGovernor ? 'governor-ai-modules' : `mp-ai-modules-${slug}`,
+    async () => {
+      const results = await Promise.all(
+        moduleList.map(async ({ key, title }) => {
+          const data = await fetchAiModule(key, isGovernor)
+          return data ? { key, title, ...data } : null
+        })
+      )
+      return results.filter(Boolean)
+    },
+    { cacheTime: 10 * 60 * 1000 }
+  )
 
   // Download PDF report
   const handleDownloadReport = useCallback(async () => {
@@ -126,75 +179,8 @@ export default function LeaderProfile() {
     }
   }, [slug, isGovernor, governorData, constituency])
 
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        setLoading(true)
-        const [governorResponse, constituenciesResponse, governorScoreResponse, financesResponse] = await Promise.all([
-          APIService.getGovernorProfile(),
-          APIService.getAllConstituencies(),
-          APIService.getGovernorScore(),
-          APIService.getCountyFinances(),
-        ])
-
-        setGovernorData(governorResponse)
-        setConstituenciesData(constituenciesResponse.constituencies || constituenciesResponse)
-        setGovernorScore(governorScoreResponse)
-        setCountyFinances(financesResponse)
-
-        // Determine leader type now that we have governorResponse, so we hit the right module set
-        const matchedGovernor = governorResponse && (slug === governorResponse._id || slug === governorResponse.id)
-        const moduleList = matchedGovernor ? GOVERNOR_AI_MODULES : MP_AI_MODULES
-
-        // Fetch MP constituency score if not governor
-        let constituencyScorePromise = Promise.resolve(null)
-        if (!matchedGovernor) {
-          constituencyScorePromise = APIService.getConstituencyScore(slug).catch(() => null)
-        }
-
-        let auditResponse = null
-        try {
-          auditResponse = matchedGovernor
-            ? await APIService.getCountyAuditFindings()
-            : await APIService.getConstituencyAuditFindings(slug)
-          } catch (err) {
-            console.error('Error fetching audit findings:', err)
-          }
-
-          // Fetch and set MP constituency score
-          if (!matchedGovernor) {
-            const scoreData = await constituencyScorePromise
-            setConstituencyScore(scoreData?.score ?? null)
-          }
-
-          setAuditFindings((auditResponse && (auditResponse.audit_findings || auditResponse)) || [])
-        
-        const results = await Promise.all(
-          moduleList.map(async ({ key, title }) => {
-            const data = await fetchAiModule(key, matchedGovernor)
-            return data ? { key, title, ...data } : null
-          })
-        )
-
-        setAiModuleResults(results.filter(Boolean))
-        setError(null)
-      } catch (err) {
-        console.error('Error fetching leader profile data:', err)
-        setError(err.message || 'Failed to load leader data')
-        setGovernorData(null)
-        setConstituenciesData([])
-        setAuditFindings([])
-        setAiModuleResults([])
-        setGovernorScore(null)
-        setConstituencyScore(null)
-        setCountyFinances(null)
-      } finally {
-        setLoading(false)
-      }
-    }
-
-    fetchData()
-  }, [slug])
+  const loading = govLoading || constLoading || govScoreLoading || financeLoading || constScoreLoading || auditLoading || aiLoading
+  const error = govError
 
   if (loading) {
     return (
@@ -224,7 +210,7 @@ export default function LeaderProfile() {
   const position = isGovernor ? 'Governor' : 'Member of Parliament'
   const party = isGovernor ? governorData.party : (constituency.mp?.party || constituency.party)
   const place = isGovernor ? (governorData.county || 'Nyeri County') : constituency.name
-  const score = isGovernor ? governorScore?.score : constituencyScore
+  const score = isGovernor ? governorScore : constituencyScore
 
   const photoKey = isGovernor ? 'governor' : constituency.slug
   const photo = LEADER_PHOTOS[photoKey]
@@ -245,7 +231,7 @@ export default function LeaderProfile() {
         Recurrent: fyData.recurrent_kshb || 0
       })).sort((a, b) => a.fy.localeCompare(b.fy))
     : []
-  
+
   console.log('DEBUG:', { slug, isGovernor, constituencySlug: constituency?.slug, photoKey })
 
   return (
