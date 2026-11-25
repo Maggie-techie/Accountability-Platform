@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip as RTooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { CheckCircle2, BrainCircuit, AlertTriangle } from 'lucide-react'
 import { Card, Badge } from '../../components/ui'
@@ -43,6 +43,8 @@ const buildWeeklyImports = (imports) => {
 
 export default function AdminDashboard() {
   const [warnings, setWarnings] = useState([])
+  // Use ref to track previous warnings and avoid infinite loop from new array references
+  const prevWarningsRef = useRef([])
 
   // Use shared async data hook with 10-minute cache (matching backend TTL)
   const fetchDashboardData = useCallback(async () => {
@@ -103,9 +105,16 @@ export default function AdminDashboard() {
   const fetchedWarnings = data?.warnings ?? []
   const weeklyImports = useMemo(() => buildWeeklyImports(importHistory), [importHistory])
 
-  // Merge warnings
+  // Merge warnings - only update if content actually changed (not just reference)
   useEffect(() => {
-    setWarnings(fetchedWarnings)
+    const prev = prevWarningsRef.current
+    const curr = fetchedWarnings
+    // Simple content comparison
+    const changed = prev.length !== curr.length || prev.some((w, i) => w !== curr[i])
+    if (changed) {
+      prevWarningsRef.current = curr
+      setWarnings(curr)
+    }
   }, [fetchedWarnings])
 
   if (isLoading) {
