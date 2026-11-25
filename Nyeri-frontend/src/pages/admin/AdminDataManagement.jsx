@@ -718,15 +718,6 @@ function AdminDataManagementInner({ entity }) {
     </div>
   )
 
-  if (loading) {
-    return (
-      <div>
-        {header}
-        <p className="text-ink-muted mb-6">Loading {lowerTitle}...</p>
-      </div>
-    )
-  }
-
   if (error) {
     return (
       <div>
