@@ -181,7 +181,7 @@ def get_score():
 # =============================================================================
 
 @governor_bp.route("/", methods=["POST"])
-@invalidate_on_write(key_prefixes=["governor"])
+@invalidate_on_write("governor")
 def create_governor():
     """Create a new governor profile"""
     try:
@@ -216,7 +216,7 @@ def create_governor():
 
 
 @governor_bp.route("/", methods=["PUT"])
-@invalidate_on_write(key_prefixes=["governor"])
+@invalidate_on_write("governor")
 def update_governor():
     """Update the governor profile"""
     try:
@@ -246,7 +246,7 @@ def update_governor():
 
 
 @governor_bp.route("/", methods=["DELETE"])
-@invalidate_on_write(key_prefixes=["governor"])
+@invalidate_on_write("governor")
 def delete_governor():
     """Delete the governor profile"""
     try:
@@ -270,7 +270,7 @@ def delete_governor():
 # =============================================================================
 
 @governor_bp.route("/finances", methods=["POST"])
-@invalidate_on_write(key_prefixes=["governor:finances"])
+@invalidate_on_write("governor:finances")
 def create_finance():
     """Create a new county finance record"""
     try:
@@ -300,7 +300,7 @@ def create_finance():
 
 
 @governor_bp.route("/finances/<finance_id>", methods=["PUT"])
-@invalidate_on_write(key_prefixes=["governor:finances"])
+@invalidate_on_write("governor:finances")
 def update_finance(finance_id):
     """Update a county finance record"""
     try:
@@ -338,7 +338,7 @@ def update_finance(finance_id):
 
 
 @governor_bp.route("/finances/<finance_id>", methods=["DELETE"])
-@invalidate_on_write(key_prefixes=["governor:finances"])
+@invalidate_on_write("governor:finances")
 def delete_finance(finance_id):
     """Delete a county finance record"""
     try:
@@ -367,7 +367,7 @@ def delete_finance(finance_id):
 # =============================================================================
 
 @governor_bp.route("/departments", methods=["POST"])
-@invalidate_on_write(key_prefixes=["governor:departments"])
+@invalidate_on_write("governor:departments")
 def create_department():
     """Create a new department record"""
     try:
@@ -397,7 +397,7 @@ def create_department():
 
 
 @governor_bp.route("/departments/<dept_id>", methods=["PUT"])
-@invalidate_on_write(key_prefixes=["governor:departments"])
+@invalidate_on_write("governor:departments")
 def update_department(dept_id):
     """Update a department record"""
     try:
@@ -435,7 +435,7 @@ def update_department(dept_id):
 
 
 @governor_bp.route("/departments/<dept_id>", methods=["DELETE"])
-@invalidate_on_write(key_prefixes=["governor:departments"])
+@invalidate_on_write("governor:departments")
 def delete_department(dept_id):
     """Delete a department record"""
     try:
@@ -464,7 +464,7 @@ def delete_department(dept_id):
 # =============================================================================
 
 @governor_bp.route("/audit", methods=["POST"])
-@invalidate_on_write(key_prefixes=["governor:audit"])
+@invalidate_on_write("governor:audit")
 def create_audit_finding():
     """Create a new county audit finding"""
     try:
@@ -494,7 +494,7 @@ def create_audit_finding():
 
 
 @governor_bp.route("/audit/<audit_id>", methods=["PUT"])
-@invalidate_on_write(key_prefixes=["governor:audit"])
+@invalidate_on_write("governor:audit")
 def update_audit_finding(audit_id):
     """Update a county audit finding"""
     try:
@@ -532,7 +532,7 @@ def update_audit_finding(audit_id):
 
 
 @governor_bp.route("/audit/<audit_id>", methods=["DELETE"])
-@invalidate_on_write(key_prefixes=["governor:audit"])
+@invalidate_on_write("governor:audit")
 def delete_audit_finding(audit_id):
     """Delete a county audit finding"""
     try:

@@ -459,7 +459,7 @@ def get_mp_by_constituency(slug):
 # =============================================================================
 
 @constituency_bp.route("/", methods=["POST"])
-@invalidate_on_write(key_prefixes=["constituencies", "constituency"])
+@invalidate_on_write("constituencies", "constituency")
 def create_constituency():
     """Create a new constituency"""
     try:
@@ -496,7 +496,7 @@ def create_constituency():
 
 
 @constituency_bp.route("/<slug>", methods=["PUT"])
-@invalidate_on_write(key_prefixes=["constituencies", "constituency"])
+@invalidate_on_write("constituencies", "constituency")
 def update_constituency(slug):
     """Update an existing constituency"""
     try:
@@ -530,7 +530,7 @@ def update_constituency(slug):
 
 
 @constituency_bp.route("/<slug>", methods=["DELETE"])
-@invalidate_on_write(key_prefixes=["constituencies", "constituency"])
+@invalidate_on_write("constituencies", "constituency")
 def delete_constituency(slug):
     """Delete a constituency"""
     try:
@@ -554,7 +554,7 @@ def delete_constituency(slug):
 # =============================================================================
 
 @constituency_bp.route("/mps", methods=["POST"])
-@invalidate_on_write(key_prefixes=["mps", "mp"])
+@invalidate_on_write("mps", "mp")
 def create_mp():
     """Create a new MP record"""
     try:
@@ -589,7 +589,7 @@ def create_mp():
 
 
 @constituency_bp.route("/mps/<slug>", methods=["PUT"])
-@invalidate_on_write(key_prefixes=["mps", "mp"])
+@invalidate_on_write("mps", "mp")
 def update_mp(slug):
     """Update an MP record"""
     try:
@@ -623,7 +623,7 @@ def update_mp(slug):
 
 
 @constituency_bp.route("/mps/<slug>", methods=["DELETE"])
-@invalidate_on_write(key_prefixes=["mps", "mp"])
+@invalidate_on_write("mps", "mp")
 def delete_mp(slug):
     """Delete an MP record"""
     try:
@@ -647,7 +647,7 @@ def delete_mp(slug):
 # =============================================================================
 
 @constituency_bp.route("/allocations", methods=["POST"])
-@invalidate_on_write(key_prefixes=["allocations"])
+@invalidate_on_write("allocations")
 def create_allocation():
     """Create a new allocation record"""
     try:
@@ -677,7 +677,7 @@ def create_allocation():
 
 
 @constituency_bp.route("/allocations/<allocation_id>", methods=["PUT"])
-@invalidate_on_write(key_prefixes=["allocations"])
+@invalidate_on_write("allocations")
 def update_allocation(allocation_id):
     """Update an allocation record"""
     try:
@@ -716,7 +716,7 @@ def update_allocation(allocation_id):
 
 
 @constituency_bp.route("/allocations/<allocation_id>", methods=["DELETE"])
-@invalidate_on_write(key_prefixes=["allocations"])
+@invalidate_on_write("allocations")
 def delete_allocation(allocation_id):
     """Delete an allocation record"""
     try:
@@ -745,7 +745,7 @@ def delete_allocation(allocation_id):
 # =============================================================================
 
 @constituency_bp.route("/audit", methods=["POST"])
-@invalidate_on_write(key_prefixes=["audit_findings"])
+@invalidate_on_write("audit_findings")
 def create_audit_finding():
     """Create a new audit finding"""
     try:
@@ -775,7 +775,7 @@ def create_audit_finding():
 
 
 @constituency_bp.route("/audit/<finding_id>", methods=["PUT"])
-@invalidate_on_write(key_prefixes=["audit_findings"])
+@invalidate_on_write("audit_findings")
 def update_audit_finding(finding_id):
     """Update an audit finding"""
     try:
@@ -813,7 +813,7 @@ def update_audit_finding(finding_id):
 
 
 @constituency_bp.route("/audit/<finding_id>", methods=["DELETE"])
-@invalidate_on_write(key_prefixes=["audit_findings"])
+@invalidate_on_write("audit_findings")
 def delete_audit_finding(finding_id):
     """Delete an audit finding"""
     try:
