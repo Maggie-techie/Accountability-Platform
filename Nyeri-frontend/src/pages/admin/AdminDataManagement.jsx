@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect, useCallback } from 'react'
-import { Pencil, Trash2, Eye, Plus, X, Save, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react'
-import { Card, Badge, Button, Input, Select, Textarea, Modal, Toast } from '../../components/ui'
+import { Pencil, Trash2, Eye, Plus, X, Loader2 } from 'lucide-react'
+import { Card, Badge, Button, Input, Select, Modal, Toast } from '../../components/ui'
 import { SearchBar } from '../../components/Filters'
 import { Pagination, Table, usePagination } from '../../components/DataDisplay'
 import APIService from '../../services/api'
@@ -443,6 +443,106 @@ function AdminDataManagementInner({ entity }) {
     setFormData({})
     setFormErrors({})
   }, [])
+
+  // Form rendering per entity (moved inside component for access to hooks/state)
+  const renderFormFields = useCallback((entity) => {
+    const commonProps = { onChange: handleFormChange, error: formErrors }
+
+    // Leaders entity is read-only (derived from governor + constituencies)
+    if (entity === 'leaders') {
+      return <p className="text-ink-muted">Leaders data is derived from Governor and Constituencies. Edit those entities directly to modify leader information.</p>
+    }
+
+    switch (entity) {
+      case 'constituencies':
+        return (
+          <>
+            <Input label="Constituency Name" name="name" value={formData.name} {...commonProps} placeholder="e.g., Kieni" />
+            <Input label="County" name="county" value={formData.county} {...commonProps} placeholder="Nyeri" />
+            {!isEditModalOpen && (
+              <Input label="Slug (auto-generated)" name="slug" value={formData.slug} readOnly {...commonProps} placeholder="Auto-generated from name" />
+            )}
+          </>
+        )
+
+      case 'financial':
+        return (
+          <>
+            <Input label="Financial Year" name="fy" value={formData.fy} {...commonProps} placeholder="e.g., 2023/2024" />
+            <div className="grid grid-cols-2 gap-4">
+              <Input label="Equitable Share (KSh Billions)" name="equitable_share_kshb" type="number" step="0.1" value={formData.equitable_share_kshb} {...commonProps} placeholder="e.g., 8.5" />
+              <Input label="Conditional Grants (KSh Billions)" name="conditional_grants_kshb" type="number" step="0.1" value={formData.conditional_grants_kshb} {...commonProps} placeholder="e.g., 1.2" />
+              <Input label="Own Source Revenue (KSh Billions)" name="osr_kshb" type="number" step="0.1" value={formData.osr_kshb} {...commonProps} placeholder="e.g., 0.8" />
+              <Input label="Total Expenditure (KSh Billions)" name="expenditure_kshb" type="number" step="0.1" value={formData.expenditure_kshb} {...commonProps} placeholder="e.g., 9.2" />
+              <Input label="Development (KSh Billions)" name="development_kshb" type="number" step="0.1" value={formData.development_kshb} {...commonProps} placeholder="e.g., 3.5" />
+              <Input label="Recurrent (KSh Billions)" name="recurrent_kshb" type="number" step="0.1" value={formData.recurrent_kshb} {...commonProps} placeholder="e.g., 5.7" />
+            </div>
+          </>
+        )
+
+      case 'allocations':
+        return (
+          <>
+            <Input label="Financial Year" name="fy" value={formData.fy} {...commonProps} placeholder="e.g., 2023/2024" />
+            <Select label="Constituency" name="constituency" value={formData.constituency} {...commonProps} options={[
+              { value: 'kieni', label: 'Kieni' },
+              { value: 'mathira', label: 'Mathira' },
+              { value: 'othaya', label: 'Othaya' },
+              { value: 'tetu', label: 'Tetu' },
+              { value: 'mukurweini', label: 'Mukurwe-ini' },
+              { value: 'nyeri_town', label: 'Nyeri Town' },
+            ]} />
+            <Input label="Amount (KSh Millions)" name="amount_kshm" type="number" step="0.1" value={formData.amount_kshm} {...commonProps} placeholder="e.g., 125.5" />
+          </>
+        )
+
+      case 'audit':
+        return (
+          <>
+            <Input label="Entity" name="entity" value={formData.entity} {...commonProps} placeholder="e.g., Kieni Constituency" />
+            <Select label="Category" name="category" value={formData.category} {...commonProps} options={[
+              { value: 'Misappropriation', label: 'Misappropriation' },
+              { value: 'Procurement Irregularity', label: 'Procurement Irregularity' },
+              { value: 'Non-compliance', label: 'Non-compliance' },
+              { value: 'Other', label: 'Other' },
+            ]} />
+            <Input label="Financial Year" name="fy" value={formData.fy} {...commonProps} placeholder="e.g., 2023/2024" />
+            <Input label="Amount Flagged (KSh Millions)" name="amount_flagged_kshm" type="number" step="0.1" value={formData.amount_flagged_kshm} {...commonProps} placeholder="e.g., 12.5" />
+            <Select label="Severity" name="severity" value={formData.severity} {...commonProps} options={[
+              { value: 'Low', label: 'Low' },
+              { value: 'Medium', label: 'Medium' },
+              { value: 'High', label: 'High' },
+            ]} />
+            <Select label="Finding Type" name="finding_type" value={formData.finding_type} {...commonProps} options={[
+              { value: 'Misappropriation', label: 'Misappropriation' },
+              { value: 'Procurement', label: 'Procurement' },
+              { value: 'Compliance', label: 'Compliance' },
+              { value: 'Other', label: 'Other' },
+            ]} />
+          </>
+        )
+
+      case 'departments':
+        return (
+          <>
+            <Input label="Department" name="department" value={formData.department} {...commonProps} placeholder="e.g., Health Services" />
+            <Input label="Financial Year" name="financial_year" value={formData.financial_year} {...commonProps} placeholder="e.g., 2023/2024" />
+            <div className="grid grid-cols-2 gap-4">
+              <Input label="Approved Budget (KSh Millions)" name="approved_budget_kshm" type="number" step="0.1" value={formData.approved_budget_kshm} {...commonProps} placeholder="e.g., 250.0" />
+              <Input label="Absorption Rate (%)" name="absorption_rate" type="number" step="0.1" min="0" max="100" value={formData.absorption_rate} {...commonProps} placeholder="e.g., 85.5" />
+            </div>
+            <Select label="Status" name="status" value={formData.status} {...commonProps} options={[
+              { value: 'On Track', label: 'On Track' },
+              { value: 'Behind', label: 'Behind' },
+              { value: 'At Risk', label: 'At Risk' },
+            ]} />
+          </>
+        )
+
+      default:
+        return <p className="text-ink-muted">No form available for this entity type.</p>
+    }
+  }, [handleFormChange, formErrors, formData, isEditModalOpen])
 
   // Fetch
   useEffect(() => {
@@ -916,108 +1016,6 @@ function IconBtn({ icon: Icon, label, danger, onClick }) {
       <Icon size={14} />
     </button>
   )
-}
-
-// ---------------------------------------------------------------------------
-// Form rendering per entity
-// ---------------------------------------------------------------------------
-function renderFormFields(entity) {
-  const commonProps = { onChange: handleFormChange, error: formErrors }
-
-  // Leaders entity is read-only (derived from governor + constituencies)
-  if (entity === 'leaders') {
-    return <p className="text-ink-muted">Leaders data is derived from Governor and Constituencies. Edit those entities directly to modify leader information.</p>
-  }
-
-  switch (entity) {
-    case 'constituencies':
-      return (
-        <>
-          <Input label="Constituency Name" name="name" value={formData.name} {...commonProps} placeholder="e.g., Kieni" />
-          <Input label="County" name="county" value={formData.county} {...commonProps} placeholder="Nyeri" />
-          {!isEditModalOpen && (
-            <Input label="Slug (auto-generated)" name="slug" value={formData.slug} readOnly {...commonProps} placeholder="Auto-generated from name" />
-          )}
-        </>
-      )
-
-    case 'financial':
-      return (
-        <>
-          <Input label="Financial Year" name="fy" value={formData.fy} {...commonProps} placeholder="e.g., 2023/2024" />
-          <div className="grid grid-cols-2 gap-4">
-            <Input label="Equitable Share (KSh Billions)" name="equitable_share_kshb" type="number" step="0.1" value={formData.equitable_share_kshb} {...commonProps} placeholder="e.g., 8.5" />
-            <Input label="Conditional Grants (KSh Billions)" name="conditional_grants_kshb" type="number" step="0.1" value={formData.conditional_grants_kshb} {...commonProps} placeholder="e.g., 1.2" />
-            <Input label="Own Source Revenue (KSh Billions)" name="osr_kshb" type="number" step="0.1" value={formData.osr_kshb} {...commonProps} placeholder="e.g., 0.8" />
-            <Input label="Total Expenditure (KSh Billions)" name="expenditure_kshb" type="number" step="0.1" value={formData.expenditure_kshb} {...commonProps} placeholder="e.g., 9.2" />
-            <Input label="Development (KSh Billions)" name="development_kshb" type="number" step="0.1" value={formData.development_kshb} {...commonProps} placeholder="e.g., 3.5" />
-            <Input label="Recurrent (KSh Billions)" name="recurrent_kshb" type="number" step="0.1" value={formData.recurrent_kshb} {...commonProps} placeholder="e.g., 5.7" />
-          </div>
-        </>
-      )
-
-    case 'allocations':
-      return (
-        <>
-          <Input label="Financial Year" name="fy" value={formData.fy} {...commonProps} placeholder="e.g., 2023/2024" />
-          <Select label="Constituency" name="constituency" value={formData.constituency} {...commonProps} options={[
-            { value: 'kieni', label: 'Kieni' },
-            { value: 'mathira', label: 'Mathira' },
-            { value: 'othaya', label: 'Othaya' },
-            { value: 'tetu', label: 'Tetu' },
-            { value: 'mukurweini', label: 'Mukurwe-ini' },
-            { value: 'nyeri_town', label: 'Nyeri Town' },
-          ]} />
-          <Input label="Amount (KSh Millions)" name="amount_kshm" type="number" step="0.1" value={formData.amount_kshm} {...commonProps} placeholder="e.g., 125.5" />
-        </>
-      )
-
-    case 'audit':
-      return (
-        <>
-          <Input label="Entity" name="entity" value={formData.entity} {...commonProps} placeholder="e.g., Kieni Constituency" />
-          <Select label="Category" name="category" value={formData.category} {...commonProps} options={[
-            { value: 'Misappropriation', label: 'Misappropriation' },
-            { value: 'Procurement Irregularity', label: 'Procurement Irregularity' },
-            { value: 'Non-compliance', label: 'Non-compliance' },
-            { value: 'Other', label: 'Other' },
-          ]} />
-          <Input label="Financial Year" name="fy" value={formData.fy} {...commonProps} placeholder="e.g., 2023/2024" />
-          <Input label="Amount Flagged (KSh Millions)" name="amount_flagged_kshm" type="number" step="0.1" value={formData.amount_flagged_kshm} {...commonProps} placeholder="e.g., 12.5" />
-          <Select label="Severity" name="severity" value={formData.severity} {...commonProps} options={[
-            { value: 'Low', label: 'Low' },
-            { value: 'Medium', label: 'Medium' },
-            { value: 'High', label: 'High' },
-          ]} />
-          <Select label="Finding Type" name="finding_type" value={formData.finding_type} {...commonProps} options={[
-            { value: 'Misappropriation', label: 'Misappropriation' },
-            { value: 'Procurement', label: 'Procurement' },
-            { value: 'Compliance', label: 'Compliance' },
-            { value: 'Other', label: 'Other' },
-          ]} />
-        </>
-      )
-
-    case 'departments':
-      return (
-        <>
-          <Input label="Department" name="department" value={formData.department} {...commonProps} placeholder="e.g., Health Services" />
-          <Input label="Financial Year" name="financial_year" value={formData.financial_year} {...commonProps} placeholder="e.g., 2023/2024" />
-          <div className="grid grid-cols-2 gap-4">
-            <Input label="Approved Budget (KSh Millions)" name="approved_budget_kshm" type="number" step="0.1" value={formData.approved_budget_kshm} {...commonProps} placeholder="e.g., 250.0" />
-            <Input label="Absorption Rate (%)" name="absorption_rate" type="number" step="0.1" min="0" max="100" value={formData.absorption_rate} {...commonProps} placeholder="e.g., 85.5" />
-          </div>
-          <Select label="Status" name="status" value={formData.status} {...commonProps} options={[
-            { value: 'On Track', label: 'On Track' },
-            { value: 'Behind', label: 'Behind' },
-            { value: 'At Risk', label: 'At Risk' },
-          ]} />
-        </>
-      )
-
-    default:
-      return <p className="text-ink-muted">No form available for this entity type.</p>
-  }
 }
 
 function renderViewDetails(entity, record) {
