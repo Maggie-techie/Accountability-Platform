@@ -1,114 +1,80 @@
-import { Server, Database, KeyRound, Users2, Activity, Plus, X, Loader2 } from 'lucide-react'
+import { Server, Database, KeyRound, Users2, Activity, Plus, X, Loader2, UserCheck } from 'lucide-react'
 import { Card, Badge, Button, Input, Modal } from '../../components/ui'
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useSharedAsyncData } from '../../hooks/useAsyncData'
 import APIService from '../../services/api'
 
 export default function SystemManagement() {
-  const [serviceStatus, setServiceStatus] = useState({
-    flaskApi: 'Unknown',
-    mongodb: 'Unknown',
-    aiModelService: 'Unknown'
-  })
-  const [databaseInfo, setDatabaseInfo] = useState({
-    databaseName: 'Unknown',
-    collectionsCount: 0,
-    totalDocuments: 0
-  })
-  const [adminUsers, setAdminUsers] = useState([])
-  const [securityInfo, setSecurityInfo] = useState({
-    jwtSessionLength: 'Long-lived (demo)',
-    lastSecretRotation: 'Not yet rotated'
-  })
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
   const [showAddAdminModal, setShowAddAdminModal] = useState(false)
   const [newAdminEmail, setNewAdminEmail] = useState('')
   const [addingAdmin, setAddingAdmin] = useState(false)
   const [addAdminError, setAddAdminError] = useState('')
 
-  const fetchAdminUsers = useCallback(async () => {
-    try {
-      const response = await APIService.getAdminUsers()
-      if (response.success && response.data) {
-        setAdminUsers(response.data)
+  // Fetch service status
+  const { data: serviceStatus, isLoading: serviceLoading, error: serviceError, refresh: refreshService } = useSharedAsyncData(
+    'system-service-status',
+    async () => {
+      const [flaskResponse, mongodbResponse, aiResponse] = await Promise.all([
+        fetch(`${APIService.baseURL}/../health`),
+        fetch(`${APIService.baseURL}/admin/summary`),
+        fetch(`${APIService.baseURL}/ai/health`)
+      ])
+
+      const flaskApiStatus = flaskResponse.ok ? 'Online' : 'Offline'
+      const mongodbStatus = mongodbResponse.ok ? 'Online' : 'Offline'
+      const aiData = await aiResponse.json()
+      const aiModelServiceStatus = aiResponse.ok && aiData.status === 'healthy' ? 'Online' : 'Offline'
+
+      return {
+        flaskApi: flaskApiStatus,
+        mongodb: mongodbStatus,
+        aiModelService: aiModelServiceStatus
       }
-    } catch (err) {
-      console.error('Error fetching admin users:', err)
-    }
-  }, [])
+    },
+    { cacheTime: 10 * 60 * 1000 }
+  )
 
-  useEffect(() => {
-    const fetchSystemData = async () => {
-      try {
-        setLoading(true)
+  // Fetch database info
+  const { data: databaseInfo, isLoading: dbLoading } = useSharedAsyncData(
+    'system-database-info',
+    async () => {
+      const response = await fetch(`${APIService.baseURL}/admin/summary`)
+      if (!response.ok) throw new Error('Failed to fetch admin summary')
 
-        // Fetch service status
-        const [flaskResponse, mongodbResponse, aiResponse] = await Promise.all([
-          fetch(`${APIService.baseURL}/../health`), // Root health endpoint
-          fetch(`${APIService.baseURL}/admin/summary`), // Admin summary for DB info
-          fetch(`${APIService.baseURL}/ai/health`) // AI health endpoint
-        ])
-
-        // Parse Flask API status
-        const flaskApiStatus = flaskResponse.ok ? 'Online' : 'Offline'
-
-        // Parse MongoDB status - if we can get admin summary, MongoDB is working
-        const mongodbStatus = mongodbResponse.ok ? 'Online' : 'Offline'
-
-        // Parse AI service status
-        const aiData = await aiResponse.json()
-        const aiModelServiceStatus = aiResponse.ok && aiData.status === 'healthy' ? 'Online' : 'Offline'
-
-        setServiceStatus({
-          flaskApi: flaskApiStatus,
-          mongodb: mongodbStatus,
-          aiModelService: aiModelServiceStatus
-        })
-
-        // Parse database info from admin summary
-        if (mongodbResponse.ok) {
-          const adminSummary = await mongodbResponse.json()
-          if (adminSummary.success && adminSummary.data) {
-            const { total_constituencies, total_governors, total_mps, total_allocations, total_audit_findings } = adminSummary.data
-
-            // Calculate total documents (sum of all main collections)
-            const totalDocuments = total_constituencies + total_governors + total_mps + total_allocations + total_audit_findings
-
-            setDatabaseInfo({
-              databaseName: 'Accountability', // This would normally come from env/config
-              collectionsCount: 5, // We know of 5 main collections from the summary
-              totalDocuments: totalDocuments
-            })
-          }
-        }
-
-        // Fetch admin users from backend
-        await fetchAdminUsers()
-
-        setError(null)
-      } catch (err) {
-        console.error('Error fetching system management data:', err)
-        setError('Failed to load system management data')
-
-        // Set fallback values
-        setServiceStatus({
-          flaskApi: 'Unknown',
-          mongodb: 'Unknown',
-          aiModelService: 'Unknown'
-        })
-        setDatabaseInfo({
-          databaseName: 'Unknown',
-          collectionsCount: 0,
-          totalDocuments: 0
-        })
-        setAdminUsers([])
-      } finally {
-        setLoading(false)
+      const adminSummary = await response.json()
+      if (!adminSummary.success || !adminSummary.data) {
+        return { databaseName: 'Unknown', collectionsCount: 0, totalDocuments: 0 }
       }
-    }
 
-    fetchSystemData()
-  }, [fetchAdminUsers])
+      const { total_constituencies, total_governors, total_mps, total_allocations, total_audit_findings } = adminSummary.data
+      const totalDocuments = total_constituencies + total_governors + total_mps + total_allocations + total_audit_findings
+
+      return {
+        databaseName: 'Accountability',
+        collectionsCount: 5,
+        totalDocuments
+      }
+    },
+    { cacheTime: 10 * 60 * 1000 }
+  )
+
+  // Fetch current logged-in admin user
+  const { data: currentUser, isLoading: userLoading } = useSharedAsyncData(
+    'current-admin-user',
+    () => APIService.getCurrentUser(),
+    { cacheTime: 10 * 60 * 1000 }
+  )
+
+  // Fetch all admin users
+  const { data: adminUsersData, isLoading: usersLoading, error: usersError, refresh: refreshUsers } = useSharedAsyncData(
+    'admin-users-list',
+    () => APIService.getAdminUsers(),
+    { cacheTime: 10 * 60 * 1000 }
+  )
+  const adminUsers = adminUsersData?.data || []
+
+  const anyLoading = serviceLoading || dbLoading || userLoading || usersLoading
+  const anyError = serviceError || usersError
 
   const handleAddAdmin = async () => {
     if (!newAdminEmail.trim()) {
@@ -116,7 +82,6 @@ export default function SystemManagement() {
       return
     }
 
-    // Basic email validation
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
     if (!emailRegex.test(newAdminEmail.trim())) {
       setAddAdminError('Please enter a valid email address')
@@ -131,7 +96,7 @@ export default function SystemManagement() {
       if (response.success) {
         setShowAddAdminModal(false)
         setNewAdminEmail('')
-        await fetchAdminUsers() // Refresh the list
+        await refreshUsers()
       } else {
         setAddAdminError(response.error || 'Failed to create admin user')
       }
@@ -151,7 +116,7 @@ export default function SystemManagement() {
     try {
       const response = await APIService.deleteAdminUser(email)
       if (response.success) {
-        await fetchAdminUsers() // Refresh the list
+        await refreshUsers()
       } else {
         alert(response.error || 'Failed to delete admin user')
       }
@@ -161,7 +126,37 @@ export default function SystemManagement() {
     }
   }
 
-  if (loading) {
+  // Build display list: current user first (with Active banner), then other admins
+  const displayUsers = useMemo(() => {
+    const users = []
+
+    // Add current user first if available
+    if (currentUser?.data) {
+      users.push({
+        email: currentUser.data.email,
+        name: currentUser.data.name,
+        status: currentUser.data.status,
+        isCurrent: true
+      })
+    }
+
+    // Add other admin users (avoid duplicates)
+    adminUsers.forEach((user) => {
+      const isDuplicate = currentUser?.data && user.email === currentUser.data.email
+      if (!isDuplicate) {
+        users.push({
+          email: user.email,
+          name: user.name || user.email.split('@')[0],
+          status: user.status,
+          isCurrent: false
+        })
+      }
+    })
+
+    return users
+  }, [currentUser, adminUsers])
+
+  if (anyLoading) {
     return (
       <div>
         <h1 className="text-2xl font-semibold mb-1">System management</h1>
@@ -170,11 +165,14 @@ export default function SystemManagement() {
     )
   }
 
-  if (error) {
+  if (anyError) {
     return (
       <div>
         <h1 className="text-2xl font-semibold mb-1">System management</h1>
-        <p className="text-ink-danger mb-6">{error}</p>
+        <p className="text-ink-danger mb-6">{anyError}</p>
+        <button onClick={() => window.location.reload()} className="btn btn-outline">
+          Try again
+        </button>
       </div>
     )
   }
@@ -188,18 +186,18 @@ export default function SystemManagement() {
         <Card className="p-6">
           <div className="flex items-center gap-2 mb-4"><Server size={16} className="text-ink-faint" /><h3 className="font-semibold">Service status</h3></div>
           <ul className="space-y-3 text-sm">
-            <StatusRow label="Flask API" status={serviceStatus.flaskApi} />
-            <StatusRow label="MongoDB" status={serviceStatus.mongodb} />
-            <StatusRow label="AI model service (Ollama)" status={serviceStatus.aiModelService} />
+            <StatusRow label="Flask API" status={serviceStatus?.flaskApi ?? 'Unknown'} />
+            <StatusRow label="MongoDB" status={serviceStatus?.mongodb ?? 'Unknown'} />
+            <StatusRow label="AI model service (Ollama)" status={serviceStatus?.aiModelService ?? 'Unknown'} />
           </ul>
         </Card>
 
         <Card className="p-6">
           <div className="flex items-center gap-2 mb-4"><Database size={16} className="text-ink-faint" /><h3 className="font-semibold">Database</h3></div>
           <ul className="space-y-2 text-sm text-ink-muted">
-            <li>Database: <span className="text-ink font-medium">{databaseInfo.databaseName}</span></li>
-            <li>Collections: <span className="text-ink font-medium">{databaseInfo.collectionsCount}</span></li>
-            <li>Total documents: <span className="text-ink font-medium">{databaseInfo.totalDocuments.toLocaleString()}</span></li>
+            <li>Database: <span className="text-ink font-medium">{databaseInfo?.databaseName ?? 'Unknown'}</span></li>
+            <li>Collections: <span className="text-ink font-medium">{databaseInfo?.collectionsCount ?? 0}</span></li>
+            <li>Total documents: <span className="text-ink font-medium">{(databaseInfo?.totalDocuments ?? 0).toLocaleString()}</span></li>
           </ul>
           <Button size="sm" variant="secondary" className="mt-4">Run backup now</Button>
         </Card>
@@ -207,12 +205,22 @@ export default function SystemManagement() {
         <Card className="p-6">
           <div className="flex items-center gap-2 mb-4"><Users2 size={16} className="text-ink-faint" /><h3 className="font-semibold">Admin users</h3></div>
           <ul className="space-y-2 text-sm">
-            {adminUsers.map((user, index) => (
+            {displayUsers.map((user, index) => (
               <li key={index} className="flex justify-between items-center">
-                <span className="text-ink">{user.email}</span>
+                <div className="flex items-center gap-3">
+                  <span className="text-ink">{user.email}</span>
+                  {user.isCurrent && (
+                    <div className="flex items-center gap-1">
+                      <UserCheck size={14} className="text-forest-600" />
+                      <Badge tone="good" className="text-xs">Active (you)</Badge>
+                    </div>
+                  )}
+                </div>
                 <div className="flex items-center gap-2">
-                  <Badge tone={user.status === 'Active' ? 'good' : 'risk'}>{user.status}</Badge>
-                  {adminUsers.length > 1 && (
+                  {!user.isCurrent && (
+                    <Badge tone={user.status === 'Active' ? 'good' : 'risk'}>{user.status}</Badge>
+                  )}
+                  {!user.isCurrent && displayUsers.length > 1 && (
                     <Button
                       size="sm"
                       variant="ghost"
@@ -235,8 +243,8 @@ export default function SystemManagement() {
         <Card className="p-6">
           <div className="flex items-center gap-2 mb-4"><KeyRound size={16} className="text-ink-faint" /><h3 className="font-semibold">Security</h3></div>
           <ul className="space-y-2 text-sm text-ink-muted">
-            <li>JWT session length: <span className="text-ink font-medium">{securityInfo.jwtSessionLength}</span></li>
-            <li>Last secret rotation: <span className="text-ink font-medium">{securityInfo.lastSecretRotation}</span></li>
+            <li>JWT session length: <span className="text-ink font-medium">Long-lived (demo)</span></li>
+            <li>Last secret rotation: <span className="text-ink font-medium">Not yet rotated</span></li>
           </ul>
           <Button size="sm" variant="secondary" className="mt-4">Rotate JWT secret</Button>
         </Card>

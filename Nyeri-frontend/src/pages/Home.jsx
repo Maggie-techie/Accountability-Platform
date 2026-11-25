@@ -249,13 +249,22 @@ export default function Home() {
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {constituencies.map((c) => {
                 const totalAllocation = Object.values(c.allocations_ksm || {}).reduce((sum, v) => sum + (v || 0), 0)
+                // Match Leaders page: Unqualified/Clean = good (green), Qualified/Concerning = watch (amber), Adverse/Disclaimer = risk (red)
+                const auditStatus = c.audit_status || ''
+                const auditTone = auditStatus === 'Unqualified' || auditStatus === 'Unqualified*' || auditStatus === 'Clean'
+                  ? 'good'
+                  : auditStatus === 'Qualified' || auditStatus === 'Concerning'
+                    ? 'watch'
+                    : auditStatus === 'Adverse' || auditStatus === 'Disclaimer'
+                      ? 'risk'
+                      : 'default'
                 return(
                 <Link key={c.slug} to={`/constituencies/${c.slug}`}>
                   <Card className="p-4 h-full hover:border-forest-300 transition-colors">
                     <div className="flex items-center justify-between mb-2">
                       <p className="font-serif font-semibold text-ink">{c.name}</p>
-                      <Badge tone={c.audit_status === 'Qualified' ? 'good' : c.audit_status === 'Unqualified' ? 'watch' : 'risk'}>
-                        {c.audit_status}
+                      <Badge tone={auditTone}>
+                        {auditStatus || 'Unknown'}
                       </Badge>
                     </div>
                     <p className="text-sm text-ink-muted">{c.mp?.name}</p>

@@ -17,6 +17,10 @@ class APIService {
     return response.json();
   }
 
+  static async getCurrentUser() {
+    return this._authenticatedFetch('/auth/me')
+  }
+
   // Constituency endpoints
   static async getAllConstituencies(filters = {}) {
     const queryParams = new URLSearchParams(filters).toString();
