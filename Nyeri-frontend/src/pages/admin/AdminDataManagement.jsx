@@ -3,18 +3,19 @@ import { Pencil, Trash2, Eye, Plus, X, Loader2 } from 'lucide-react'
 import { Card, Badge, Button, Input, Select, Modal, Toast } from '../../components/ui'
 import { SearchBar } from '../../components/Filters'
 import { Pagination, Table, usePagination } from '../../components/DataDisplay'
+import { useSharedAsyncData } from '../../hooks/useAsyncData'
 import APIService from '../../services/api'
 
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
 const configs = {
-  leaders: { title: 'Leaders' },
-  constituencies: { title: 'Constituencies' },
-  financial: { title: 'County Finances' },
-  allocations: { title: 'NG-CDF Allocations' },
-  audit: { title: 'Audit Findings' },
-  departments: { title: 'Departmental Data' },
+  leaders: { title: 'Leaders', singular: 'Leader' },
+  constituencies: { title: 'Constituencies', singular: 'Constituency' },
+  financial: { title: 'County Finances', singular: 'Finance Record' },
+  allocations: { title: 'NG-CDF Allocations', singular: 'Allocation' },
+  audit: { title: 'Audit Findings', singular: 'Audit Finding' },
+  departments: { title: 'Departmental Data', singular: 'Department' },
 }
 
 // Backend paths per entity. NOTE: trailing slashes match Flask routes that are
@@ -178,14 +179,8 @@ export default function AdminDataManagement({ entity }) {
 function AdminDataManagementInner({ entity }) {
   const config = configs[entity]
   const title = config?.title ?? 'Data'
+  const singularTitle = config?.singular ?? 'Record'
   const lowerTitle = title.toLowerCase()
-
-  const [data, setData] = useState([])
-  const [q, setQ] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
-  const [warning, setWarning] = useState(null)
-  const [reloadKey, setReloadKey] = useState(0)
 
   // CRUD modal state
   const [isAddModalOpen, setIsAddModalOpen] = useState(false)
@@ -197,8 +192,155 @@ function AdminDataManagementInner({ entity }) {
   const [formErrors, setFormErrors] = useState({})
   const [submitting, setSubmitting] = useState(false)
   const [toasts, setToasts] = useState([])
+  const [searchQuery, setSearchQuery] = useState('')
 
-  const retry = useCallback(() => setReloadKey((k) => k + 1), [])
+  // Use shared async data hook with 10-minute cache (matching backend TTL)
+  // Leaders entity is special - fetches from multiple endpoints
+  const cacheKey = `admin-${entity}`
+  const { data, isLoading, error, refresh } = useSharedAsyncData(cacheKey, async () => {
+    // Leaders: fetch governor + constituencies + scores
+    if (entity === 'leaders') {
+      const token = localStorage.getItem('authToken')
+      const headers = {}
+      if (token) headers['Authorization'] = `Bearer ${token}`
+
+      const getJson = async (path) => {
+        const res = await fetch(`${APIService.baseURL}${path}`, { headers })
+        if (!res.ok) throw new Error(`${path} returned HTTP ${res.status}`)
+        return unwrap(await res.json())
+      }
+
+      const [govResult, constResult, govScoreResult] = await Promise.allSettled([
+        getJson('/governor/'),
+        getJson('/constituency/'),
+        getJson('/governor/score'),
+      ])
+
+      if (govResult.status === 'rejected' && constResult.status === 'rejected') {
+        throw govResult.reason
+      }
+
+      let governors = []
+      let governorScore = null
+      if (govResult.status === 'fulfilled') {
+        const v = govResult.value
+        const govData = v?.data ?? v
+        governors = toArray(govData, 'governors', 'governor')
+        if (governors.length === 0 && govData && typeof govData === 'object' && !Array.isArray(govData) && Object.keys(govData).length) {
+          governors = [govData]
+        }
+      }
+
+      if (govScoreResult.status === 'fulfilled') {
+        const v = govScoreResult.value
+        const scoreData = v?.data ?? v
+        governorScore = scoreData?.score ?? null
+      }
+
+      let constituencies = []
+      if (constResult.status === 'fulfilled') {
+        const v = constResult.value
+        const constData = v?.data ?? v
+        constituencies = toArray(constData, 'constituencies', 'data', 'results') || []
+        if (constituencies.length === 0 && Array.isArray(constData)) {
+          constituencies = constData
+        }
+      }
+
+      // Fetch MP scores in parallel for each constituency
+      const constituencyScores = {}
+      if (constituencies.length > 0) {
+        const scorePromises = constituencies
+          .filter(c => c?.slug)
+          .map(c => getJson(`/constituency/${c.slug}/score`)
+            .then(res => ({ slug: c.slug, score: (res?.data ?? res)?.score }))
+            .catch(() => ({ slug: c.slug, score: null }))
+          )
+        const scoreResults = await Promise.all(scorePromises)
+        scoreResults.forEach(r => {
+          if (r.slug && r.score != null) {
+            constituencyScores[r.slug] = r.score
+          }
+        })
+      }
+
+      return {
+        governors,
+        constituencies,
+        governorScore,
+        constituencyScores
+      }
+    }
+
+    // Other entities: single endpoint
+    const token = localStorage.getItem('authToken')
+    const headers = {}
+    if (token) headers['Authorization'] = `Bearer ${token}`
+
+    const res = await fetch(`${APIService.baseURL}${endpoints[entity]}`, { headers })
+    if (!res.ok) throw new Error(`${endpoints[entity]} returned HTTP ${res.status}`)
+
+    const json = await res.json()
+    return unwrap(json)
+  }, { cacheTime: 10 * 60 * 1000 }) // 10 min cache to match backend
+
+  // Post-process data based on entity type
+  const processedData = useMemo(() => {
+    if (!data) return []
+
+    let rows = []
+
+    if (entity === 'leaders') {
+      const { governors, constituencies, governorScore, constituencyScores } = data
+      rows = [
+        ...governors.map((g, i) => {
+          const n = normalizeGovernor(g, i)
+          return {
+            ...n,
+            score: governorScore ?? n.score,
+          }
+        }),
+        ...constituencies.map((c, i) => {
+          const n = normalizeConstituency(c, i)
+          const fetchedScore = constituencyScores[c?.slug] ?? n.score
+          return {
+            _key: `mp-${n._key}`,
+            name: n.mp,
+            position: 'MP',
+            party: n.party,
+            place: n.name,
+            score: fetchedScore,
+          }
+        }),
+      ]
+      return rows
+    }
+
+    const raw = data
+    switch (entity) {
+      case 'constituencies':
+        rows = toArray(raw, 'constituencies').map(normalizeConstituency)
+        break
+      case 'financial':
+        rows = toArray(raw, 'finances', 'financial_data', 'years').map(normalizeFinancial)
+        break
+      case 'allocations':
+        const allocData = toArray(raw, 'allocations') || (Array.isArray(raw) ? raw : [])
+        rows = normalizeAllocations(allocData)
+        break
+      case 'audit':
+        rows = toArray(raw, 'audit_findings', 'findings').map(normalizeAudit)
+        break
+      case 'departments':
+        rows = toArray(raw, 'departments').map(normalizeDepartment)
+        break
+      default:
+        return []
+    }
+    return rows
+  }, [data, entity])
+
+  const retry = useCallback(() => refresh(), [refresh])
 
   // Toast helpers
   const showToast = useCallback((type, message) => {
@@ -548,176 +690,12 @@ function AdminDataManagementInner({ entity }) {
     }
   }, [handleFormChange, formErrors, formData, isEditModalOpen])
 
-  // Fetch
-  useEffect(() => {
-    const controller = new AbortController()
-    let cancelled = false
-
-    const load = async () => {
-      setQ('')
-      setWarning(null)
-
-      if (!config) {
-        setData([])
-        setError('Invalid entity type')
-        setLoading(false)
-        return
-      }
-
-      setLoading(true)
-      setError(null)
-
-      const token = localStorage.getItem('authToken')
-      // Only send Authorization when we have a token. Skipping Content-Type on
-      // GETs also avoids unnecessary CORS preflights.
-      const headers = {}
-      if (token) headers['Authorization'] = `Bearer ${token}`
-
-      const getJson = async (path) => {
-        const res = await fetch(`${APIService.baseURL}${path}`, { headers, signal: controller.signal })
-        if (!res.ok) throw new Error(`${path} returned HTTP ${res.status}`)
-        return unwrap(await res.json())
-      }
-
-      try {
-        let rows = []
-
-        if (entity === 'leaders') {
-          // Fetch governor and constituencies first
-          const [govResult, constResult, govScoreResult] = await Promise.allSettled([
-            getJson('/governor/'),
-            getJson('/constituency/'),
-            getJson('/governor/score'),
-          ])
-
-          if (govResult.status === 'rejected' && constResult.status === 'rejected') {
-            throw govResult.reason
-          }
-
-          const failed = []
-
-          let governors = []
-          let governorScore = null
-          if (govResult.status === 'fulfilled') {
-            const v = govResult.value
-            const govData = v?.data ?? v
-            governors = toArray(govData, 'governors', 'governor')
-            if (governors.length === 0 && govData && typeof govData === 'object' && !Array.isArray(govData) && Object.keys(govData).length) {
-              governors = [govData]
-            }
-          } else {
-            failed.push('governor')
-          }
-
-          // Fetch governor score
-          if (govScoreResult.status === 'fulfilled') {
-            const v = govScoreResult.value
-            const scoreData = v?.data ?? v
-            governorScore = scoreData?.score ?? null
-          }
-
-          let constituencies = []
-          if (constResult.status === 'fulfilled') {
-            const v = constResult.value
-            const constData = v?.data ?? v
-            constituencies = toArray(constData, 'constituencies', 'data', 'results') || []
-            if (constituencies.length === 0 && Array.isArray(constData)) {
-              constituencies = constData
-            }
-          } else {
-            failed.push('constituencies')
-          }
-
-          if (failed.length) setWarning(`Could not load: ${failed.join(', ')}.`)
-
-          // Fetch MP scores in parallel for each constituency
-          const constituencyScores = {}
-          if (constituencies.length > 0) {
-            const scorePromises = constituencies
-              .filter(c => c?.slug)
-              .map(c => getJson(`/constituency/${c.slug}/score`)
-                .then(res => ({ slug: c.slug, score: (res?.data ?? res)?.score }))
-                .catch(() => ({ slug: c.slug, score: null }))
-              )
-            const scoreResults = await Promise.all(scorePromises)
-            scoreResults.forEach(r => {
-              if (r.slug && r.score != null) {
-                constituencyScores[r.slug] = r.score
-              }
-            })
-          }
-
-          rows = [
-            ...governors.map((g, i) => {
-              const n = normalizeGovernor(g, i)
-              return {
-                ...n,
-                score: governorScore ?? n.score,
-              }
-            }),
-            ...constituencies.map((c, i) => {
-              const n = normalizeConstituency(c, i)
-              const fetchedScore = constituencyScores[c?.slug] ?? n.score
-              return {
-                _key: `mp-${n._key}`,
-                name: n.mp,
-                position: 'MP',
-                party: n.party,
-                place: n.name,
-                score: fetchedScore,
-              }
-            }),
-          ]
-        } else {
-          const raw = await getJson(endpoints[entity])
-
-          switch (entity) {
-            case 'constituencies':
-              rows = toArray(raw, 'constituencies').map(normalizeConstituency)
-              break
-            case 'financial':
-              rows = toArray(raw, 'finances', 'financial_data', 'years').map(normalizeFinancial)
-              break
-            case 'allocations':
-              // API returns { allocations: [...], pagination: {...} } or direct array
-              const allocData = toArray(raw, 'allocations') || (Array.isArray(raw) ? raw : [])
-              rows = normalizeAllocations(allocData)
-              break
-            case 'audit':
-              rows = toArray(raw, 'audit_findings', 'findings').map(normalizeAudit)
-              break
-            case 'departments':
-              rows = toArray(raw, 'departments').map(normalizeDepartment)
-              break
-            default:
-              throw new Error('Unknown entity type')
-          }
-        }
-
-        if (!cancelled) setData(rows)
-      } catch (err) {
-        if (cancelled || err?.name === 'AbortError') return
-        console.error(`Error fetching ${entity} data:`, err)
-        setError(`Failed to load ${lowerTitle}: ${err.message}`)
-        setData([])
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    }
-
-    load()
-    return () => {
-      cancelled = true
-      controller.abort()
-    }
-  }, [entity, config, lowerTitle, reloadKey])
-
-  // All hooks must run before any early return, so these live up here.
+  // Filter data based on search query
   const filtered = useMemo(() => {
-    if (!q) return data
-    const needle = q.toLowerCase()
-    return data.filter((r) => JSON.stringify(r).toLowerCase().includes(needle))
-  }, [data, q])
+    if (!searchQuery) return processedData
+    const needle = searchQuery.toLowerCase()
+    return processedData.filter((r) => JSON.stringify(r).toLowerCase().includes(needle))
+  }, [processedData, searchQuery])
 
   const { page, setPage, totalPages, pageItems } = usePagination(filtered, 8)
 
@@ -725,9 +703,9 @@ function AdminDataManagementInner({ entity }) {
   const allocationCols = useMemo(() => {
     if (entity !== 'allocations') return []
     const names = new Set()
-    data.forEach((r) => Object.keys(r.values ?? {}).forEach((n) => names.add(n)))
+    processedData.forEach((r) => Object.keys(r.values ?? {}).forEach((n) => names.add(n)))
     return [...names].sort()
-  }, [entity, data])
+  }, [entity, processedData])
 
   const header = (
     <div className="flex items-center justify-between mb-1">
@@ -761,23 +739,28 @@ function AdminDataManagementInner({ entity }) {
     )
   }
 
+  if (isLoading) {
+    return (
+      <div>
+        {header}
+        <p className="text-ink-muted mb-6">Loading {lowerTitle}...</p>
+      </div>
+    )
+  }
+
   return (
     <div>
       {header}
       <p className="text-ink-muted mb-6">Search, review and manage {lowerTitle} records.</p>
 
-      {warning && (
-        <div className="mb-4 rounded border border-line bg-gold-50 px-4 py-3 text-sm text-ink">{warning}</div>
-      )}
-
       <div className="mb-4 max-w-sm">
-        <SearchBar value={q} onChange={setQ} placeholder={`Search ${lowerTitle}`} />
+        <SearchBar value={searchQuery} onChange={setSearchQuery} placeholder={`Search ${lowerTitle}`} />
       </div>
 
       {filtered.length === 0 ? (
         <Card className="p-6">
           <p className="text-sm text-ink-muted">
-            {data.length === 0 ? `No ${lowerTitle} data available.` : `No ${lowerTitle} match "${q}".`}
+            {processedData.length === 0 ? `No ${lowerTitle} data available.` : `No ${lowerTitle} match "${searchQuery}".`}
           </p>
         </Card>
       ) : (
@@ -809,7 +792,7 @@ function AdminDataManagementInner({ entity }) {
       <Modal
         isOpen={isAddModalOpen}
         onClose={() => setIsAddModalOpen(false)}
-        title={`Add ${title.slice(0, -1)}`}
+        title={`Add ${singularTitle}`}
         size="lg"
       >
         <form onSubmit={handleFormSubmit} className="space-y-4">
@@ -829,7 +812,7 @@ function AdminDataManagementInner({ entity }) {
       <Modal
         isOpen={isEditModalOpen}
         onClose={() => { setIsEditModalOpen(false); setSelectedRecord(null); }}
-        title={`Edit ${title.slice(0, -1)}`}
+        title={`Edit ${singularTitle}`}
         size="lg"
       >
         <form onSubmit={handleFormSubmit} className="space-y-4">
@@ -849,7 +832,7 @@ function AdminDataManagementInner({ entity }) {
       <Modal
         isOpen={isDeleteModalOpen}
         onClose={() => { setIsDeleteModalOpen(false); setSelectedRecord(null); }}
-        title={`Delete ${title.slice(0, -1)}`}
+        title={`Delete ${singularTitle}`}
         size="sm"
       >
         <p className="text-ink-muted mb-6">Are you sure you want to delete this record? This action cannot be undone.</p>
@@ -872,7 +855,7 @@ function AdminDataManagementInner({ entity }) {
       <Modal
         isOpen={isViewModalOpen}
         onClose={() => { setIsViewModalOpen(false); setSelectedRecord(null); }}
-        title={`View ${title.slice(0, -1)} Details`}
+        title={`View ${singularTitle} Details`}
         size="lg"
       >
         {selectedRecord && renderViewDetails(entity, selectedRecord)}
