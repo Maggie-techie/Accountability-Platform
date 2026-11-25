@@ -16,6 +16,7 @@ const financialYears = ['2022/23', '2023/24', '2024/25', '2025/26']
 export default function DatasetUpload() {
   const [step, setStep] = useState(0)
   const [fileName, setFileName] = useState('')
+  const [fileObj, setFileObj] = useState(null)
   const [fileContent, setFileContent] = useState(null)
   const [category, setCategory] = useState('')
   const [county, setCounty] = useState('Nyeri')
@@ -34,6 +35,7 @@ export default function DatasetUpload() {
   function reset() {
     setStep(0)
     setFileName('')
+    setFileObj(null)
     setFileContent(null)
     setCategory('')
     setFy('')
@@ -48,6 +50,7 @@ export default function DatasetUpload() {
   const handleFileChange = (e) => {
     const file = e.target.files?.[0]
     if (file) {
+      setFileObj(file)
       setFileName(file.name)
       // Read file content as text for preview
       const reader = new FileReader()
@@ -63,6 +66,7 @@ export default function DatasetUpload() {
       }
       reader.readAsText(file)
     } else {
+      setFileObj(null)
       setFileName('')
       setFileContent(null)
       setPreviewData(null)
@@ -70,7 +74,7 @@ export default function DatasetUpload() {
   }
 
   const handleUpload = async () => {
-    if (!fileName || !fileContent) {
+    if (!fileName || !fileObj) {
       setApiError('Please select a file to upload')
       return
     }
@@ -79,38 +83,12 @@ export default function DatasetUpload() {
     setApiError(null)
 
     try {
-      // Prepare form data for file upload
-      const formData = new FormData()
-      const file = new Blob([fileContent], { type: 'text/csv' })
-      formData.append('file', file, fileName)
-      formData.append('dataset_type', datasetType)
-
-      const response = await fetch(`${APIService.baseURL}/dataset/upload`, {
-        method: 'POST',
-        body: formData
-      })
-
-      if (!response.ok) {
-        if (response.status === 404) {
-          setApiError('Dataset upload endpoint not available. This feature may be under development.')
-          // For demonstration, we'll simulate a successful upload
-          setTimeout(() => {
-            setLoading(false)
-            next()
-          }, 1000)
-          return
-        } else {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-        }
-      }
-
-      const result = await response.json()
-      // If upload was successful, move to next step
+      const result = await APIService.uploadDataset(fileObj, datasetType)
       if (result.success) {
         setTimeout(() => {
           setLoading(false)
           next()
-        }, 1000)
+        }, 500)
       } else {
         setApiError(result.error || 'Upload failed')
         setLoading(false)
@@ -123,7 +101,7 @@ export default function DatasetUpload() {
   }
 
   const handlePreview = async () => {
-    if (!fileContent || !datasetType) {
+    if (!fileObj || !datasetType) {
       setApiError('No file or dataset type selected')
       return
     }
@@ -132,47 +110,13 @@ export default function DatasetUpload() {
     setApiError(null)
 
     try {
-      // Prepare form data for preview
-      const formData = new FormData()
-      const file = new Blob([fileContent], { type: 'text/csv' })
-      formData.append('file', file, fileName)
-      formData.append('dataset_type', datasetType)
-
-      const response = await fetch(`${APIService.baseURL}/dataset/preview`, {
-        method: 'POST',
-        body: formData
-      })
-
-      if (!response.ok) {
-        if (response.status === 404) {
-          setApiError('Dataset preview endpoint not available. Showing simulated preview.')
-          // For demonstration, we'll show a simulated preview
-          setTimeout(() => {
-            setLoading(false)
-            // Simulate some preview data
-            setPreviewData([
-              ['Constituency', 'MP', 'FY24/25 Allocation (millions)'],
-              ['Tetu', 'Hon. Geoffrey Wandeto', '161.5'],
-              ['Kieni', 'Hon. Njoroge Wainaina', '206.6'],
-              ['Mathira', 'Hon. George Kariuki', '189.2'],
-              ['Othaya', 'Hon. Mary Wamaua', '156.8'],
-              ['Mukurwe-ini', 'Hon. John Kaguchia', '172.3']
-            ])
-            next()
-          }, 1000)
-          return
-        } else {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-        }
-      }
-
-      const result = await response.json()
+      const result = await APIService.previewDataset(fileObj, datasetType)
       if (result.success && result.data) {
         setPreviewData(result.data.preview || [])
         setTimeout(() => {
           setLoading(false)
           next()
-        }, 1000)
+        }, 500)
       } else {
         setApiError(result.error || 'Preview failed')
         setLoading(false)
@@ -185,7 +129,7 @@ export default function DatasetUpload() {
   }
 
   const handleValidate = async () => {
-    if (!fileContent || !datasetType || !county || !fy) {
+    if (!fileObj || !datasetType || !county || !fy) {
       setApiError('Please complete all previous steps')
       return
     }
@@ -194,50 +138,13 @@ export default function DatasetUpload() {
     setApiError(null)
 
     try {
-      // Prepare form data for validation
-      const formData = new FormData()
-      const file = new Blob([fileContent], { type: 'text/csv' })
-      formData.append('file', file, fileName)
-      formData.append('dataset_type', datasetType)
-      formData.append('county', county)
-      formData.append('financial_year', fy)
-
-      const response = await fetch(`${APIService.baseURL}/dataset/validate`, {
-        method: 'POST',
-        body: formData
-      })
-
-      if (!response.ok) {
-        if (response.status === 404) {
-          setApiError('Dataset validation endpoint not available. Showing simulated validation.')
-          // For demonstration, we'll show simulated validation results
-          setTimeout(() => {
-            setLoading(false)
-            setValidationResults({
-              passed: 24,
-              warnings: [
-                { id: 1, type: 'Inconsistent financial year', record: 'Mathira allocation row 14', detail: '"FY2024-25" should be "2024/25"' },
-                { id: 2, type: 'Duplicate record', record: 'Nyeri Town audit finding row 8', detail: 'Matches existing record AF-003' }
-              ],
-              errors: [
-                { id: 1, type: 'Missing value', record: 'Dept Spending Tracker row 22', detail: 'q3_spend_kshm is empty' }
-              ]
-            })
-            next()
-          }, 1000)
-          return
-        } else {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-        }
-      }
-
-      const result = await response.json()
+      const result = await APIService.validateDataset(fileObj, datasetType, county, fy)
       if (result.success) {
         setValidationResults(result.data || {})
         setTimeout(() => {
           setLoading(false)
           next()
-        }, 1000)
+        }, 500)
       } else {
         setApiError(result.error || 'Validation failed')
         setLoading(false)
@@ -259,38 +166,7 @@ export default function DatasetUpload() {
     setApiError(null)
 
     try {
-      // Prepare form data for import
-      const formData = new FormData()
-      const file = new Blob([fileContent], { type: 'text/csv' })
-      formData.append('file', file, fileName)
-      formData.append('dataset_type', datasetType)
-      formData.append('county', county)
-      formData.append('financial_year', fy)
-
-      const response = await fetch(`${APIService.baseURL}/dataset/import`, {
-        method: 'POST',
-        body: formData
-      })
-
-      if (!response.ok) {
-        if (response.status === 404) {
-          setApiError('Dataset import endpoint not available. Showing simulated import.')
-          // For demonstration, we'll show a simulated import success
-          setTimeout(() => {
-            setLoading(false)
-            setImportResult({
-              success: true,
-              message: 'Import successful',
-              recordsImported: 24
-            })
-          }, 1000)
-          return
-        } else {
-          throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-        }
-      }
-
-      const result = await response.json()
+      const result = await APIService.importDataset(fileObj, datasetType, county, fy)
       if (result.success) {
         setImportResult(result)
       } else {

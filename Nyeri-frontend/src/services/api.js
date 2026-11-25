@@ -17,6 +17,10 @@ class APIService {
     return response.json();
   }
 
+  static async getCurrentUser() {
+    return this._authenticatedFetch('/auth/me')
+  }
+
   // Constituency endpoints
   static async getAllConstituencies(filters = {}) {
     const queryParams = new URLSearchParams(filters).toString();
@@ -398,6 +402,81 @@ class APIService {
     return this._authenticatedFetch(`/governor/audit/${auditId}`, {
       method: 'DELETE'
     });
+  }
+
+  // =============================================================================
+  // Dataset Upload
+  // =============================================================================
+  static async uploadDataset(file, datasetType) {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('dataset_type', datasetType)
+
+    const response = await fetch(`${this.baseURL}/dataset/upload`, {
+      method: 'POST',
+      body: formData
+    })
+    return response.json()
+  }
+
+  static async previewDataset(file, datasetType) {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('dataset_type', datasetType)
+
+    const response = await fetch(`${this.baseURL}/dataset/preview`, {
+      method: 'POST',
+      body: formData
+    })
+    return response.json()
+  }
+
+  static async validateDataset(file, datasetType, county, financialYear) {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('dataset_type', datasetType)
+    formData.append('county', county)
+    formData.append('financial_year', financialYear)
+
+    const response = await fetch(`${this.baseURL}/dataset/validate`, {
+      method: 'POST',
+      body: formData
+    })
+    return response.json()
+  }
+
+  static async importDataset(file, datasetType, county, financialYear) {
+    const formData = new FormData()
+    formData.append('file', file)
+    formData.append('dataset_type', datasetType)
+    formData.append('county', county)
+    formData.append('financial_year', financialYear)
+
+    const response = await fetch(`${this.baseURL}/dataset/import`, {
+      method: 'POST',
+      body: formData
+    })
+    return response.json()
+  }
+
+  // =============================================================================
+  // Admin Users
+  // =============================================================================
+  static async getAdminUsers() {
+    return this._authenticatedFetch('/admin/users')
+  }
+
+  static async createAdminUser(email) {
+    return this._authenticatedFetch('/admin/users', {
+      method: 'POST',
+      body: JSON.stringify({ email })
+    })
+  }
+
+  static async deleteAdminUser(email) {
+    return this._authenticatedFetch(`/admin/users/${encodeURIComponent(email)}`, {
+      method: 'DELETE'
+    })
   }
 }
 

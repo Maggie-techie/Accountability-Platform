@@ -1,8 +1,9 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { BarChart, Bar, XAxis, YAxis, Tooltip as RTooltip, ResponsiveContainer, CartesianGrid } from 'recharts'
 import { CheckCircle2, BrainCircuit, AlertTriangle } from 'lucide-react'
 import { Card, Badge } from '../../components/ui'
 import { KpiCard } from '../../components/Insights'
+import { useSharedAsyncData } from '../../hooks/useAsyncData'
 import APIService from '../../services/api'
 
 const DAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -41,20 +42,12 @@ const buildWeeklyImports = (imports) => {
 }
 
 export default function AdminDashboard() {
-  const [adminSummary, setAdminSummary] = useState(null)
-  const [importHistory, setImportHistory] = useState([])
-  const [anomaliesData, setAnomaliesData] = useState([])
-  const [weeklyImports, setWeeklyImports] = useState(DAYS.map((day) => ({ day, imports: 0 })))
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null) // fatal: summary failed
-  const [warnings, setWarnings] = useState([]) // non-fatal: partial failures
-  const [reloadKey, setReloadKey] = useState(0)
+  const [warnings, setWarnings] = useState([])
+  // Use ref to track previous warnings and avoid infinite loop from new array references
+  const prevWarningsRef = useRef([])
 
-  const retry = useCallback(() => setReloadKey((k) => k + 1), [])
-
-  useEffect(() => {
-    let cancelled = false
-
+  // Use shared async data hook with 10-minute cache (matching backend TTL)
+  const fetchDashboardData = useCallback(async () => {
     const token = localStorage.getItem('authToken')
     const headers = { 'Content-Type': 'application/json' }
     if (token) headers['Authorization'] = `Bearer ${token}`
@@ -65,84 +58,66 @@ export default function AdminDashboard() {
       return unwrap(await res.json())
     }
 
-    const load = async () => {
-      setLoading(true)
-      setError(null)
-      const newWarnings = []
+    // Fetch all three endpoints in parallel
+    const [summaryResult, importsResult, anomaliesResult] = await Promise.allSettled([
+      getJson('/admin/summary'),
+      getJson('/admin/import-history'),
+      getJson('/anomalies'),
+    ])
 
-      try {
-        // Summary is required; the rest are best-effort.
-        const [summaryResult, importsResult, anomaliesResult] = await Promise.allSettled([
-          getJson('/admin/summary'),
-          getJson('/admin/import-history'),
-          getJson('/anomalies'),
-        ])
+    const newWarnings = []
 
-        if (cancelled) return
+    if (summaryResult.status === 'rejected') {
+      throw new Error(`Failed to fetch summary: ${summaryResult.reason?.message ?? 'unknown error'}`)
+    }
+    const summary = summaryResult.value ?? {}
 
-        if (summaryResult.status === 'rejected') {
-          throw new Error(`Failed to fetch summary: ${summaryResult.reason?.message ?? 'unknown error'}`)
-        }
-        const summary = summaryResult.value ?? {}
-
-        // Import history
-        let imports = []
-        if (importsResult.status === 'fulfilled') {
-          imports = toArray(importsResult.value, 'importHistory', 'imports', 'history')
-        } else {
-          newWarnings.push('Import history is unavailable.')
-          console.warn('Import history failed:', importsResult.reason)
-        }
-
-        // Anomalies: general endpoint first, then a constituency fallback
-        let anomalies = []
-        if (anomaliesResult.status === 'fulfilled') {
-          anomalies = toArray(anomaliesResult.value, 'anomalies')
-        }
-
-        if (anomalies.length === 0) {
-          try {
-            const constituencies = toArray(await getJson('/constituency/'), 'constituencies')
-
-            const results = await Promise.all(
-              constituencies.slice(0, 5).map((c) => {
-                const slug = c?.slug ?? c?.constituency_slug
-                if (!slug) return Promise.resolve([])
-                return getJson(`/ai/mp/${slug}/anomalies`)
-                  .then((data) => toArray(data, 'anomalies'))
-                  .catch(() => [])
-              })
-            )
-            anomalies = results.flat()
-          } catch (err) {
-            console.warn('Could not fetch anomalies from constituencies:', err)
-            newWarnings.push('Anomaly data is unavailable.')
-          }
-        }
-
-        if (cancelled) return
-
-        setAdminSummary(summary)
-        setImportHistory(imports)
-        setAnomaliesData(anomalies)
-        setWeeklyImports(buildWeeklyImports(imports))
-        setWarnings(newWarnings)
-      } catch (err) {
-        if (cancelled) return
-        console.error('Error fetching dashboard data:', err)
-        setError(`Failed to load dashboard data: ${err.message}`)
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
+    // Import history
+    let imports = []
+    if (importsResult.status === 'fulfilled') {
+      imports = toArray(importsResult.value, 'importHistory', 'imports', 'history')
+    } else {
+      newWarnings.push('Import history is unavailable.')
+      console.warn('Import history failed:', importsResult.reason)
     }
 
-    load()
-    return () => {
-      cancelled = true
+    // Anomalies: general endpoint first, then a constituency fallback
+    let anomalies = []
+    if (anomaliesResult.status === 'fulfilled') {
+      anomalies = toArray(anomaliesResult.value, 'anomalies')
     }
-  }, [reloadKey])
 
-  if (loading) {
+    return { summary, imports, anomalies, warnings: newWarnings }
+  }, [])
+
+  const { data, isLoading, error, refresh } = useSharedAsyncData(
+    'admin-dashboard',
+    fetchDashboardData,
+    { cacheTime: 10 * 60 * 1000 } // 10 min cache to match backend
+  )
+
+  const retry = useCallback(() => refresh(), [refresh])
+
+  // Derived state from cached data
+  const adminSummary = data?.summary ?? null
+  const importHistory = data?.imports ?? []
+  const anomaliesData = data?.anomalies ?? []
+  const fetchedWarnings = data?.warnings ?? []
+  const weeklyImports = useMemo(() => buildWeeklyImports(importHistory), [importHistory])
+
+  // Merge warnings - only update if content actually changed (not just reference)
+  useEffect(() => {
+    const prev = prevWarningsRef.current
+    const curr = fetchedWarnings
+    // Simple content comparison
+    const changed = prev.length !== curr.length || prev.some((w, i) => w !== curr[i])
+    if (changed) {
+      prevWarningsRef.current = curr
+      setWarnings(curr)
+    }
+  }, [fetchedWarnings])
+
+  if (isLoading) {
     return (
       <div>
         <h1 className="text-2xl font-semibold mb-1">Admin dashboard</h1>

@@ -355,6 +355,344 @@ def admin_import_history():
 
 
 # ---------------------------------------------------------------------------
+# Admin Users Endpoints
+# ---------------------------------------------------------------------------
+@general_bp.route("/admin/users", methods=["GET"])
+def get_admin_users():
+    """Get list of admin users"""
+    try:
+        db = get_db()
+
+        # Check if admin_users collection exists, if not create it
+        if 'admin_users' not in db.list_collection_names():
+            db.create_collection('admin_users')
+            # Create default admin user
+            default_admin = {
+                "email": "karongo27@gmail.com",
+                "status": "Active",
+                "created_at": datetime.utcnow(),
+                "updated_at": datetime.utcnow()
+            }
+            db.admin_users.insert_one(default_admin)
+
+        users = list(db.admin_users.find({}, {"_id": 0}))
+        return jsonify({"success": True, "data": users, "count": len(users)}), 200
+
+    except Exception as e:
+        logging.exception("Error fetching admin users")
+        return jsonify({"error": "Failed to fetch admin users", "details": str(e)}), 500
+
+
+@general_bp.route("/admin/users", methods=["POST"])
+def create_admin_user():
+    """Create a new admin user"""
+    try:
+        db = get_db()
+        data = request.get_json()
+
+        if not data or 'email' not in data:
+            return jsonify({"error": "Email is required"}), 400
+
+        email = data['email'].strip().lower()
+        if not email:
+            return jsonify({"error": "Email cannot be empty"}), 400
+
+        # Check if user already exists
+        existing = db.admin_users.find_one({"email": email})
+        if existing:
+            return jsonify({"error": "Admin user with this email already exists"}), 409
+
+        # Create new admin user
+        new_user = {
+            "email": email,
+            "status": "Active",
+            "created_at": datetime.utcnow(),
+            "updated_at": datetime.utcnow()
+        }
+        db.admin_users.insert_one(new_user)
+
+        return jsonify({
+            "success": True,
+            "message": "Admin user created successfully",
+            "data": new_user
+        }), 201
+
+    except Exception as e:
+        logging.exception("Error creating admin user")
+        return jsonify({"error": "Failed to create admin user", "details": str(e)}), 500
+
+
+@general_bp.route("/admin/users/<email>", methods=["DELETE"])
+def delete_admin_user(email):
+    """Delete an admin user"""
+    try:
+        db = get_db()
+
+        # Prevent deleting the last admin user
+        user_count = db.admin_users.count_documents({})
+        if user_count <= 1:
+            return jsonify({"error": "Cannot delete the last admin user"}), 400
+
+        result = db.admin_users.delete_one({"email": email})
+        if result.deleted_count == 0:
+            return jsonify({"error": "Admin user not found"}), 404
+
+        return jsonify({
+            "success": True,
+            "message": "Admin user deleted successfully"
+        }), 200
+
+    except Exception as e:
+        logging.exception("Error deleting admin user")
+        return jsonify({"error": "Failed to delete admin user", "details": str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
+# Dataset Upload Endpoints
+# ---------------------------------------------------------------------------
+def parse_csv_content(content):
+    """Parse CSV content into list of dicts"""
+    import csv
+    import io
+    reader = csv.DictReader(io.StringIO(content))
+    return list(reader)
+
+@general_bp.route("/dataset/upload", methods=["POST"])
+def dataset_upload():
+    """Upload a dataset file"""
+    try:
+        if 'file' not in request.files:
+            return jsonify({"error": "No file provided"}), 400
+
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({"error": "No file selected"}), 400
+
+        # Read file content
+        content = file.read().decode('utf-8')
+
+        # Parse CSV to get preview
+        preview_data = parse_csv_content(content)
+
+        return jsonify({
+            "success": True,
+            "message": "File uploaded successfully",
+            "data": {
+                "filename": file.filename,
+                "preview": preview_data[:10],  # First 10 rows for preview
+                "total_rows": len(preview_data),
+                "columns": list(preview_data[0].keys()) if preview_data else []
+            }
+        }), 200
+
+    except Exception as e:
+        logging.exception("Error uploading dataset")
+        return jsonify({"error": "Failed to upload file", "details": str(e)}), 500
+
+
+@general_bp.route("/dataset/preview", methods=["POST"])
+def dataset_preview():
+    """Preview dataset file"""
+    try:
+        if 'file' not in request.files:
+            return jsonify({"error": "No file provided"}), 400
+
+        file = request.files['file']
+        if file.filename == '':
+            return jsonify({"error": "No file selected"}), 400
+
+        content = file.read().decode('utf-8')
+        preview_data = parse_csv_content(content)
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "preview": preview_data[:20],
+                "total_rows": len(preview_data),
+                "columns": list(preview_data[0].keys()) if preview_data else []
+            }
+        }), 200
+
+    except Exception as e:
+        logging.exception("Error previewing dataset")
+        return jsonify({"error": "Failed to preview file", "details": str(e)}), 500
+
+
+@general_bp.route("/dataset/validate", methods=["POST"])
+def dataset_validate():
+    """Validate dataset file against schema"""
+    try:
+        if 'file' not in request.files:
+            return jsonify({"error": "No file provided"}), 400
+
+        file = request.files['file']
+        dataset_type = request.form.get('dataset_type')
+        county = request.form.get('county')
+        financial_year = request.form.get('financial_year')
+
+        if not dataset_type:
+            return jsonify({"error": "Dataset type is required"}), 400
+
+        content = file.read().decode('utf-8')
+        rows = parse_csv_content(content)
+
+        # Define required columns per dataset type
+        required_columns = {
+            'constituencies': ['name', 'slug', 'county'],
+            'allocations': ['constituency_slug', 'financial_year', 'amount_kshm'],
+            'audit_findings': ['constituency_slug', 'financial_year', 'finding_type', 'note'],
+            'departmental_spending': ['department', 'financial_year', 'approved_budget_kshm', 'absorption_rate']
+        }
+
+        errors = []
+        warnings = []
+
+        if dataset_type in required_columns:
+            required = required_columns[dataset_type]
+            if rows:
+                headers = list(rows[0].keys())
+                for req in required:
+                    if req not in headers:
+                        errors.append({
+                            "type": "Missing column",
+                            "record": req,
+                            "detail": f"Required column '{req}' not found in CSV"
+                        })
+
+        # Check for empty required fields
+        for i, row in enumerate(rows):
+            if dataset_type in required_columns:
+                for req in required_columns[dataset_type]:
+                    if req in row and (not row[req] or row[req].strip() == ''):
+                        warnings.append({
+                            "type": "Empty required field",
+                            "record": f"Row {i+1}",
+                            "detail": f"'{req}' is empty"
+                        })
+
+        return jsonify({
+            "success": True,
+            "data": {
+                "passed": len(rows) - len(errors),
+                "warnings": warnings,
+                "errors": errors
+            }
+        }), 200
+
+    except Exception as e:
+        logging.exception("Error validating dataset")
+        return jsonify({"error": "Failed to validate file", "details": str(e)}), 500
+
+
+@general_bp.route("/dataset/import", methods=["POST"])
+def dataset_import():
+    """Import dataset into database"""
+    try:
+        if 'file' not in request.files:
+            return jsonify({"error": "No file provided"}), 400
+
+        file = request.files['file']
+        dataset_type = request.form.get('dataset_type')
+        county = request.form.get('county')
+        financial_year = request.form.get('financial_year')
+
+        if not dataset_type:
+            return jsonify({"error": "Dataset type is required"}), 400
+
+        content = file.read().decode('utf-8')
+        rows = parse_csv_content(content)
+
+        db = get_db()
+        imported_count = 0
+        errors = []
+
+        if dataset_type == 'constituencies':
+            for i, row in enumerate(rows):
+                try:
+                    # Check if slug exists
+                    existing = db.constituencies.find_one({"slug": row.get('slug')})
+                    if existing:
+                        errors.append(f"Row {i+1}: Constituency with slug '{row.get('slug')}' already exists")
+                        continue
+
+                    doc = {
+                        "name": row.get('name'),
+                        "slug": row.get('slug'),
+                        "county": row.get('county', county),
+                        "created_at": datetime.utcnow(),
+                        "updated_at": datetime.utcnow()
+                    }
+                    db.constituencies.insert_one(doc)
+                    imported_count += 1
+                except Exception as e:
+                    errors.append(f"Row {i+1}: {str(e)}")
+
+        elif dataset_type == 'allocations':
+            for i, row in enumerate(rows):
+                try:
+                    doc = {
+                        "constituency_slug": row.get('constituency_slug'),
+                        "financial_year": row.get('financial_year', financial_year),
+                        "amount_kshm": float(row.get('amount_kshm', 0)),
+                        "created_at": datetime.utcnow(),
+                        "updated_at": datetime.utcnow()
+                    }
+                    db.allocations.insert_one(doc)
+                    imported_count += 1
+                except Exception as e:
+                    errors.append(f"Row {i+1}: {str(e)}")
+
+        elif dataset_type == 'audit_findings':
+            for i, row in enumerate(rows):
+                try:
+                    doc = {
+                        "constituency_slug": row.get('constituency_slug'),
+                        "financial_year": row.get('financial_year', financial_year),
+                        "finding_type": row.get('finding_type'),
+                        "note": row.get('note', ''),
+                        "amount_at_risk": row.get('amount_at_risk', ''),
+                        "fy_reviewed": row.get('financial_year', financial_year),
+                        "county": county,
+                        "created_at": datetime.utcnow(),
+                        "updated_at": datetime.utcnow()
+                    }
+                    db.audit_findings.insert_one(doc)
+                    imported_count += 1
+                except Exception as e:
+                    errors.append(f"Row {i+1}: {str(e)}")
+
+        elif dataset_type == 'departmental_spending':
+            for i, row in enumerate(rows):
+                try:
+                    doc = {
+                        "department": row.get('department'),
+                        "financial_year": row.get('financial_year', financial_year),
+                        "approved_budget_kshm": float(row.get('approved_budget_kshm', 0)),
+                        "absorption_rate": float(row.get('absorption_rate', 0)),
+                        "status": "On Track" if float(row.get('absorption_rate', 0)) >= 80 else "Behind",
+                        "created_at": datetime.utcnow(),
+                        "updated_at": datetime.utcnow()
+                    }
+                    db.department_absorption.insert_one(doc)
+                    imported_count += 1
+                except Exception as e:
+                    errors.append(f"Row {i+1}: {str(e)}")
+
+        return jsonify({
+            "success": True,
+            "message": f"Import completed. {imported_count} records imported.",
+            "data": {
+                "records_imported": imported_count,
+                "errors": errors
+            }
+        }), 200
+
+    except Exception as e:
+        logging.exception("Error importing dataset")
+        return jsonify({"error": "Failed to import file", "details": str(e)}), 500
+
+
+# ---------------------------------------------------------------------------
 # GNN-based Anomaly Detection Endpoints
 # ---------------------------------------------------------------------------
 @general_bp.route("/anomalies/gnn/train", methods=["POST"])
