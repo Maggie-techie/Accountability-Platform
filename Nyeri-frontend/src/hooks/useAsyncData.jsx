@@ -138,16 +138,19 @@ export function useSharedAsyncData(key, fetcher, options = {}) {
 export function Skeleton({ className = '', variant = 'text' }) {
   const base = 'animate-pulse bg-forest-100 rounded'
   const variants = {
-    text: 'h-4 w-3/4',
-    title: 'h-6 w-1/2',
+    text: 'h-4 w-3/4 inline-block',
+    title: 'h-6 w-1/2 inline-block',
     card: 'h-32 w-full',
     avatar: 'h-12 w-12 rounded-full',
-    badge: 'h-6 w-20 rounded',
-    kpi: 'h-10 w-24',
+    badge: 'h-6 w-20 rounded inline-block',
+    kpi: 'h-10 w-24 inline-block',
     chart: 'h-64 w-full',
     tableRow: 'h-10 w-full',
   }
-  return <div className={`${base} ${variants[variant]} ${className}`} />
+  // Use span for inline variants to avoid DOM nesting issues inside <p> tags
+  const inlineVariants = ['text', 'title', 'badge', 'kpi']
+  const Tag = inlineVariants.includes(variant) ? 'span' : 'div'
+  return <Tag className={`${base} ${variants[variant]} ${className}`} />
 }
 
 /**
