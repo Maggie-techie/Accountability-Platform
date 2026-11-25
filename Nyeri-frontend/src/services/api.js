@@ -199,6 +199,206 @@ class APIService {
     });
     return response.json();
   }
+
+  // Helper method for authenticated requests
+  static async _authenticatedFetch(path, options = {}) {
+    const token = localStorage.getItem('authToken');
+    const headers = {
+      'Content-Type': 'application/json',
+      ...options.headers
+    };
+    if (token) headers['Authorization'] = `Bearer ${token}`;
+
+    const response = await fetch(`${this.baseURL}${path}`, {
+      ...options,
+      headers
+    });
+    return response.json();
+  }
+
+  // =============================================================================
+  // CRUD - Constituencies
+  // =============================================================================
+  static async createConstituency(data) {
+    return this._authenticatedFetch('/constituency/', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  }
+
+  static async updateConstituency(slug, data) {
+    return this._authenticatedFetch(`/constituency/${slug}`, {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    });
+  }
+
+  static async deleteConstituency(slug) {
+    return this._authenticatedFetch(`/constituency/${slug}`, {
+      method: 'DELETE'
+    });
+  }
+
+  // =============================================================================
+  // CRUD - MPs
+  // =============================================================================
+  static async createMP(data) {
+    return this._authenticatedFetch('/constituency/mps', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  }
+
+  static async updateMP(slug, data) {
+    return this._authenticatedFetch(`/constituency/mps/${slug}`, {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    });
+  }
+
+  static async deleteMP(slug) {
+    return this._authenticatedFetch(`/constituency/mps/${slug}`, {
+      method: 'DELETE'
+    });
+  }
+
+  // =============================================================================
+  // CRUD - Allocations
+  // =============================================================================
+  static async createAllocation(data) {
+    return this._authenticatedFetch('/constituency/allocations', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  }
+
+  static async updateAllocation(allocationId, data) {
+    return this._authenticatedFetch(`/constituency/allocations/${allocationId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    });
+  }
+
+  static async deleteAllocation(allocationId) {
+    return this._authenticatedFetch(`/constituency/allocations/${allocationId}`, {
+      method: 'DELETE'
+    });
+  }
+
+  // =============================================================================
+  // CRUD - Constituency Audit Findings
+  // =============================================================================
+  static async createConstituencyAuditFinding(data) {
+    return this._authenticatedFetch('/constituency/audit', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  }
+
+  static async updateConstituencyAuditFinding(findingId, data) {
+    return this._authenticatedFetch(`/constituency/audit/${findingId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    });
+  }
+
+  static async deleteConstituencyAuditFinding(findingId) {
+    return this._authenticatedFetch(`/constituency/audit/${findingId}`, {
+      method: 'DELETE'
+    });
+  }
+
+  // =============================================================================
+  // CRUD - Governor Profile
+  // =============================================================================
+  static async createGovernor(data) {
+    return this._authenticatedFetch('/governor/', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  }
+
+  static async updateGovernor(data) {
+    return this._authenticatedFetch('/governor/', {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    });
+  }
+
+  static async deleteGovernor() {
+    return this._authenticatedFetch('/governor/', {
+      method: 'DELETE'
+    });
+  }
+
+  // =============================================================================
+  // CRUD - County Finances
+  // =============================================================================
+  static async createFinance(data) {
+    return this._authenticatedFetch('/governor/finances', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  }
+
+  static async updateFinance(financeId, data) {
+    return this._authenticatedFetch(`/governor/finances/${financeId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    });
+  }
+
+  static async deleteFinance(financeId) {
+    return this._authenticatedFetch(`/governor/finances/${financeId}`, {
+      method: 'DELETE'
+    });
+  }
+
+  // =============================================================================
+  // CRUD - Departments
+  // =============================================================================
+  static async createDepartment(data) {
+    return this._authenticatedFetch('/governor/departments', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  }
+
+  static async updateDepartment(deptId, data) {
+    return this._authenticatedFetch(`/governor/departments/${deptId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    });
+  }
+
+  static async deleteDepartment(deptId) {
+    return this._authenticatedFetch(`/governor/departments/${deptId}`, {
+      method: 'DELETE'
+    });
+  }
+
+  // =============================================================================
+  // CRUD - County Audit Findings
+  // =============================================================================
+  static async createCountyAuditFinding(data) {
+    return this._authenticatedFetch('/governor/audit', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+  }
+
+  static async updateCountyAuditFinding(auditId, data) {
+    return this._authenticatedFetch(`/governor/audit/${auditId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data)
+    });
+  }
+
+  static async deleteCountyAuditFinding(auditId) {
+    return this._authenticatedFetch(`/governor/audit/${auditId}`, {
+      method: 'DELETE'
+    });
+  }
 }
 
 export default APIService;
