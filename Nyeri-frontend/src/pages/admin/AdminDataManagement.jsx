@@ -1,6 +1,6 @@
 import { useMemo, useState, useEffect, useCallback } from 'react'
-import { Pencil, Trash2, Eye, Plus } from 'lucide-react'
-import { Card, Badge, Button } from '../../components/ui'
+import { Pencil, Trash2, Eye, Plus, X, Save, Loader2, AlertCircle, CheckCircle2 } from 'lucide-react'
+import { Card, Badge, Button, Input, Select, Textarea, Modal, Toast } from '../../components/ui'
 import { SearchBar } from '../../components/Filters'
 import { Pagination, Table, usePagination } from '../../components/DataDisplay'
 import APIService from '../../services/api'
@@ -187,7 +187,262 @@ function AdminDataManagementInner({ entity }) {
   const [warning, setWarning] = useState(null)
   const [reloadKey, setReloadKey] = useState(0)
 
+  // CRUD modal state
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false)
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false)
+  const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false)
+  const [isViewModalOpen, setIsViewModalOpen] = useState(false)
+  const [selectedRecord, setSelectedRecord] = useState(null)
+  const [formData, setFormData] = useState({})
+  const [formErrors, setFormErrors] = useState({})
+  const [submitting, setSubmitting] = useState(false)
+  const [toasts, setToasts] = useState([])
+
   const retry = useCallback(() => setReloadKey((k) => k + 1), [])
+
+  // Toast helpers
+  const showToast = useCallback((type, message) => {
+    const id = Date.now()
+    setToasts(prev => [...prev, { id, type, message }])
+    if (type !== 'error') {
+      setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 5000)
+    }
+  }, [])
+
+  const dismissToast = useCallback((id) => {
+    setToasts(prev => prev.filter(t => t.id !== id))
+  }, [])
+
+  // Get empty form state for each entity type
+  const getEmptyForm = useCallback((entity) => {
+    const forms = {
+      constituencies: { name: '', county: 'Nyeri', slug: '' },
+      financial: { fy: '', equitable_share_kshb: '', conditional_grants_kshb: '', osr_kshb: '', expenditure_kshb: '', development_kshb: '', recurrent_kshb: '' },
+      allocations: { fy: '', constituency: '', amount_kshm: '' },
+      audit: { entity: '', category: '', fy: '', amount_flagged_kshm: '', severity: 'Medium', finding_type: 'Misappropriation' },
+      departments: { department: '', financial_year: '', approved_budget_kshm: '', absorption_rate: '', status: 'On Track' },
+    }
+    return forms[entity] || {}
+  }, [])
+
+  // Normalize form data for API
+  const normalizeFormForApi = useCallback((entity, data, isUpdate = false) => {
+    const normalized = { ...data }
+    switch (entity) {
+      case 'constituencies':
+        if (!isUpdate) {
+          normalized.slug = data.name.toLowerCase().replace(/\s+/g, '_').replace(/[^a-z0-9_]/g, '')
+        }
+        break
+      case 'financial':
+        // Convert to numbers
+        ;['equitable_share_kshb', 'conditional_grants_kshb', 'osr_kshb', 'expenditure_kshb', 'development_kshb', 'recurrent_kshb'].forEach(k => {
+          if (normalized[k]) normalized[k] = parseFloat(normalized[k])
+        })
+        break
+      case 'allocations':
+        normalized.amount_kshm = parseFloat(normalized.amount_kshm)
+        break
+      case 'audit':
+        normalized.amount_flagged_kshm = parseFloat(normalized.amount_flagged_kshm)
+        break
+      case 'departments':
+        normalized.approved_budget_kshm = parseFloat(normalized.approved_budget_kshm)
+        normalized.absorption_rate = parseFloat(normalized.absorption_rate)
+        break
+    }
+    return normalized
+  }, [])
+
+  // Validate form
+  const validateForm = useCallback((entity, data) => {
+    const errors = {}
+    switch (entity) {
+      case 'constituencies':
+        if (!data.name?.trim()) errors.name = 'Name is required'
+        break
+      case 'financial':
+        if (!data.fy?.trim()) errors.fy = 'Financial year is required'
+        break
+      case 'allocations':
+        if (!data.fy?.trim()) errors.fy = 'Financial year is required'
+        if (!data.constituency?.trim()) errors.constituency = 'Constituency is required'
+        if (!data.amount_kshm) errors.amount_kshm = 'Amount is required'
+        break
+      case 'audit':
+        if (!data.entity?.trim()) errors.entity = 'Entity is required'
+        if (!data.category?.trim()) errors.category = 'Category is required'
+        if (!data.fy?.trim()) errors.fy = 'Financial year is required'
+        break
+      case 'departments':
+        if (!data.department?.trim()) errors.department = 'Department is required'
+        if (!data.financial_year?.trim()) errors.financial_year = 'Financial year is required'
+        break
+    }
+    setFormErrors(errors)
+    return Object.keys(errors).length === 0
+  }, [])
+
+  // CRUD handlers
+  const handleAddClick = useCallback(() => {
+    if (entity === 'leaders') {
+      showToast('info', 'Leaders data is derived from Governor and Constituencies. Edit those entities directly.')
+      return
+    }
+    setFormData(getEmptyForm(entity))
+    setFormErrors({})
+    setIsAddModalOpen(true)
+  }, [entity, getEmptyForm, showToast])
+
+  const handleViewClick = useCallback((record) => {
+    setSelectedRecord(record)
+    setIsViewModalOpen(true)
+  }, [])
+
+  const handleEditClick = useCallback((record) => {
+    if (entity === 'leaders') {
+      showToast('info', 'Leaders data is derived from Governor and Constituencies. Edit those entities directly.')
+      return
+    }
+    setSelectedRecord(record)
+    // Pre-populate form with record data
+    const formValues = { ...record }
+    // Remove internal keys
+    delete formValues._key
+    setFormData(formValues)
+    setFormErrors({})
+    setIsEditModalOpen(true)
+  }, [entity, showToast])
+
+  const handleDeleteClick = useCallback((record) => {
+    if (entity === 'leaders') {
+      showToast('info', 'Leaders data is derived from Governor and Constituencies. Edit those entities directly.')
+      return
+    }
+    setSelectedRecord(record)
+    setIsDeleteModalOpen(true)
+  }, [entity, showToast])
+
+  const handleFormChange = useCallback((e) => {
+    const { name, value, type, checked } = e.target
+    setFormData(prev => ({
+      ...prev,
+      [name]: type === 'checkbox' ? checked : value
+    }))
+    // Clear error for this field
+    if (formErrors[name]) {
+      setFormErrors(prev => ({ ...prev, [name]: null }))
+    }
+  }, [formErrors])
+
+  const handleFormSubmit = useCallback(async (e) => {
+    e.preventDefault()
+    if (!validateForm(entity, formData)) return
+
+    setSubmitting(true)
+    const normalizedData = normalizeFormForApi(entity, formData, isEditModalOpen)
+
+    try {
+      let result
+      if (isEditModalOpen && selectedRecord) {
+        // Update
+        switch (entity) {
+          case 'constituencies':
+            result = await APIService.updateConstituency(selectedRecord._key, normalizedData)
+            break
+          case 'financial':
+            result = await APIService.updateFinance(selectedRecord._key, normalizedData)
+            break
+          case 'allocations':
+            result = await APIService.updateAllocation(selectedRecord._key, normalizedData)
+            break
+          case 'audit':
+            result = await APIService.updateCountyAuditFinding(selectedRecord._key, normalizedData)
+            break
+          case 'departments':
+            result = await APIService.updateDepartment(selectedRecord._key, normalizedData)
+            break
+        }
+        showToast('success', 'Record updated successfully')
+      } else {
+        // Create
+        switch (entity) {
+          case 'constituencies':
+            result = await APIService.createConstituency(normalizedData)
+            break
+          case 'financial':
+            result = await APIService.createFinance(normalizedData)
+            break
+          case 'allocations':
+            result = await APIService.createAllocation(normalizedData)
+            break
+          case 'audit':
+            result = await APIService.createCountyAuditFinding(normalizedData)
+            break
+          case 'departments':
+            result = await APIService.createDepartment(normalizedData)
+            break
+        }
+        showToast('success', 'Record created successfully')
+      }
+
+      // Close modals and refresh data
+      setIsAddModalOpen(false)
+      setIsEditModalOpen(false)
+      setSelectedRecord(null)
+      setFormData({})
+      setReloadKey(k => k + 1)
+    } catch (err) {
+      console.error(`Error ${isEditModalOpen ? 'updating' : 'creating'} ${entity}:`, err)
+      showToast('error', `Failed to ${isEditModalOpen ? 'update' : 'create'} record: ${err.message}`)
+    } finally {
+      setSubmitting(false)
+    }
+  }, [entity, formData, isEditModalOpen, selectedRecord, normalizeFormForApi, validateForm, showToast])
+
+  const handleDeleteConfirm = useCallback(async () => {
+    if (!selectedRecord) return
+
+    setSubmitting(true)
+    try {
+      switch (entity) {
+        case 'constituencies':
+          await APIService.deleteConstituency(selectedRecord._key)
+          break
+        case 'financial':
+          await APIService.deleteFinance(selectedRecord._key)
+          break
+        case 'allocations':
+          await APIService.deleteAllocation(selectedRecord._key)
+          break
+        case 'audit':
+          await APIService.deleteCountyAuditFinding(selectedRecord._key)
+          break
+        case 'departments':
+          await APIService.deleteDepartment(selectedRecord._key)
+          break
+      }
+      showToast('success', 'Record deleted successfully')
+      setIsDeleteModalOpen(false)
+      setSelectedRecord(null)
+      setReloadKey(k => k + 1)
+    } catch (err) {
+      console.error(`Error deleting ${entity}:`, err)
+      showToast('error', `Failed to delete record: ${err.message}`)
+    } finally {
+      setSubmitting(false)
+    }
+  }, [entity, selectedRecord, showToast])
+
+  const closeAllModals = useCallback(() => {
+    setIsAddModalOpen(false)
+    setIsEditModalOpen(false)
+    setIsDeleteModalOpen(false)
+    setIsViewModalOpen(false)
+    setSelectedRecord(null)
+    setFormData({})
+    setFormErrors({})
+  }, [])
 
   // Fetch
   useEffect(() => {
@@ -373,9 +628,11 @@ function AdminDataManagementInner({ entity }) {
   const header = (
     <div className="flex items-center justify-between mb-1">
       <h1 className="text-2xl font-semibold">{title}</h1>
-      <Button size="sm">
-        <Plus size={15} /> Add record
-      </Button>
+      {entity !== 'leaders' && (
+        <Button size="sm" onClick={handleAddClick}>
+          <Plus size={15} /> Add record
+        </Button>
+      )}
     </div>
   )
 
@@ -431,9 +688,9 @@ function AdminDataManagementInner({ entity }) {
                   {renderCells(entity, row, allocationCols)}
                   <td className="py-3 pr-2 pl-4">
                     <div className="flex gap-1">
-                      <IconBtn icon={Eye} label="View" />
-                      <IconBtn icon={Pencil} label="Edit" />
-                      <IconBtn icon={Trash2} label="Delete" danger />
+                      <IconBtn icon={Eye} label="View" onClick={() => handleViewClick(row)} />
+                      <IconBtn icon={Pencil} label="Edit" onClick={() => handleEditClick(row)} />
+                      <IconBtn icon={Trash2} label="Delete" danger onClick={() => handleDeleteClick(row)} />
                     </div>
                   </td>
                 </>
@@ -443,6 +700,95 @@ function AdminDataManagementInner({ entity }) {
           <Pagination page={page} totalPages={totalPages} onChange={setPage} />
         </>
       )}
+
+      {/* Modals */}
+      <Modal
+        isOpen={isAddModalOpen}
+        onClose={() => setIsAddModalOpen(false)}
+        title={`Add ${title.slice(0, -1)}`}
+        size="lg"
+      >
+        <form onSubmit={handleFormSubmit} className="space-y-4">
+          {renderFormFields(entity)}
+          <div className="flex justify-end gap-3 pt-4 border-t border-ink/10">
+            <Button type="button" variant="secondary" onClick={() => setIsAddModalOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" disabled={submitting}>
+              {submitting && <Loader2 size={16} className="animate-spin mr-2" />}
+              {submitting ? 'Saving...' : 'Save'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal
+        isOpen={isEditModalOpen}
+        onClose={() => { setIsEditModalOpen(false); setSelectedRecord(null); }}
+        title={`Edit ${title.slice(0, -1)}`}
+        size="lg"
+      >
+        <form onSubmit={handleFormSubmit} className="space-y-4">
+          {renderFormFields(entity)}
+          <div className="flex justify-end gap-3 pt-4 border-t border-ink/10">
+            <Button type="button" variant="secondary" onClick={() => { setIsEditModalOpen(false); setSelectedRecord(null); }}>
+              Cancel
+            </Button>
+            <Button type="submit" variant="primary" disabled={submitting}>
+              {submitting && <Loader2 size={16} className="animate-spin mr-2" />}
+              {submitting ? 'Saving...' : 'Update'}
+            </Button>
+          </div>
+        </form>
+      </Modal>
+
+      <Modal
+        isOpen={isDeleteModalOpen}
+        onClose={() => { setIsDeleteModalOpen(false); setSelectedRecord(null); }}
+        title={`Delete ${title.slice(0, -1)}`}
+        size="sm"
+      >
+        <p className="text-ink-muted mb-6">Are you sure you want to delete this record? This action cannot be undone.</p>
+        {selectedRecord && (
+          <div className="mb-4 p-3 bg-ink/5 rounded text-sm font-medium text-ink">
+            {selectedRecord.name || selectedRecord.fy || selectedRecord.entity || selectedRecord.department || 'Selected record'}
+          </div>
+        )}
+        <div className="flex justify-end gap-3">
+          <Button variant="secondary" onClick={() => { setIsDeleteModalOpen(false); setSelectedRecord(null); }}>
+            Cancel
+          </Button>
+          <Button variant="danger" onClick={handleDeleteConfirm} disabled={submitting}>
+            {submitting && <Loader2 size={16} className="animate-spin mr-2" />}
+            {submitting ? 'Deleting...' : 'Delete'}
+          </Button>
+        </div>
+      </Modal>
+
+      <Modal
+        isOpen={isViewModalOpen}
+        onClose={() => { setIsViewModalOpen(false); setSelectedRecord(null); }}
+        title={`View ${title.slice(0, -1)} Details`}
+        size="lg"
+      >
+        {selectedRecord && renderViewDetails(entity, selectedRecord)}
+        <div className="flex justify-end pt-4 border-t border-ink/10">
+          <Button variant="secondary" onClick={() => { setIsViewModalOpen(false); setSelectedRecord(null); }}>
+            Close
+          </Button>
+        </div>
+      </Modal>
+
+      {/* Toasts */}
+      {toasts.map((toast) => (
+        <Toast
+          key={toast.id}
+          type={toast.type}
+          message={toast.message}
+          onClose={() => dismissToast(toast.id)}
+          duration={toast.type === 'error' ? 0 : 5000}
+        />
+      ))}
     </div>
   )
 }
@@ -559,14 +905,133 @@ function renderCells(entity, row, allocationCols) {
   }
 }
 
-function IconBtn({ icon: Icon, label, danger }) {
+function IconBtn({ icon: Icon, label, danger, onClick }) {
   return (
     <button
       type="button"
       title={label}
+      onClick={onClick}
       className={`p-1.5 rounded hover:bg-ink/5 ${danger ? 'text-clay-500' : 'text-ink-muted'}`}
     >
       <Icon size={14} />
     </button>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Form rendering per entity
+// ---------------------------------------------------------------------------
+function renderFormFields(entity) {
+  const commonProps = { onChange: handleFormChange, error: formErrors }
+
+  // Leaders entity is read-only (derived from governor + constituencies)
+  if (entity === 'leaders') {
+    return <p className="text-ink-muted">Leaders data is derived from Governor and Constituencies. Edit those entities directly to modify leader information.</p>
+  }
+
+  switch (entity) {
+    case 'constituencies':
+      return (
+        <>
+          <Input label="Constituency Name" name="name" value={formData.name} {...commonProps} placeholder="e.g., Kieni" />
+          <Input label="County" name="county" value={formData.county} {...commonProps} placeholder="Nyeri" />
+          {!isEditModalOpen && (
+            <Input label="Slug (auto-generated)" name="slug" value={formData.slug} readOnly {...commonProps} placeholder="Auto-generated from name" />
+          )}
+        </>
+      )
+
+    case 'financial':
+      return (
+        <>
+          <Input label="Financial Year" name="fy" value={formData.fy} {...commonProps} placeholder="e.g., 2023/2024" />
+          <div className="grid grid-cols-2 gap-4">
+            <Input label="Equitable Share (KSh Billions)" name="equitable_share_kshb" type="number" step="0.1" value={formData.equitable_share_kshb} {...commonProps} placeholder="e.g., 8.5" />
+            <Input label="Conditional Grants (KSh Billions)" name="conditional_grants_kshb" type="number" step="0.1" value={formData.conditional_grants_kshb} {...commonProps} placeholder="e.g., 1.2" />
+            <Input label="Own Source Revenue (KSh Billions)" name="osr_kshb" type="number" step="0.1" value={formData.osr_kshb} {...commonProps} placeholder="e.g., 0.8" />
+            <Input label="Total Expenditure (KSh Billions)" name="expenditure_kshb" type="number" step="0.1" value={formData.expenditure_kshb} {...commonProps} placeholder="e.g., 9.2" />
+            <Input label="Development (KSh Billions)" name="development_kshb" type="number" step="0.1" value={formData.development_kshb} {...commonProps} placeholder="e.g., 3.5" />
+            <Input label="Recurrent (KSh Billions)" name="recurrent_kshb" type="number" step="0.1" value={formData.recurrent_kshb} {...commonProps} placeholder="e.g., 5.7" />
+          </div>
+        </>
+      )
+
+    case 'allocations':
+      return (
+        <>
+          <Input label="Financial Year" name="fy" value={formData.fy} {...commonProps} placeholder="e.g., 2023/2024" />
+          <Select label="Constituency" name="constituency" value={formData.constituency} {...commonProps} options={[
+            { value: 'kieni', label: 'Kieni' },
+            { value: 'mathira', label: 'Mathira' },
+            { value: 'othaya', label: 'Othaya' },
+            { value: 'tetu', label: 'Tetu' },
+            { value: 'mukurweini', label: 'Mukurwe-ini' },
+            { value: 'nyeri_town', label: 'Nyeri Town' },
+          ]} />
+          <Input label="Amount (KSh Millions)" name="amount_kshm" type="number" step="0.1" value={formData.amount_kshm} {...commonProps} placeholder="e.g., 125.5" />
+        </>
+      )
+
+    case 'audit':
+      return (
+        <>
+          <Input label="Entity" name="entity" value={formData.entity} {...commonProps} placeholder="e.g., Kieni Constituency" />
+          <Select label="Category" name="category" value={formData.category} {...commonProps} options={[
+            { value: 'Misappropriation', label: 'Misappropriation' },
+            { value: 'Procurement Irregularity', label: 'Procurement Irregularity' },
+            { value: 'Non-compliance', label: 'Non-compliance' },
+            { value: 'Other', label: 'Other' },
+          ]} />
+          <Input label="Financial Year" name="fy" value={formData.fy} {...commonProps} placeholder="e.g., 2023/2024" />
+          <Input label="Amount Flagged (KSh Millions)" name="amount_flagged_kshm" type="number" step="0.1" value={formData.amount_flagged_kshm} {...commonProps} placeholder="e.g., 12.5" />
+          <Select label="Severity" name="severity" value={formData.severity} {...commonProps} options={[
+            { value: 'Low', label: 'Low' },
+            { value: 'Medium', label: 'Medium' },
+            { value: 'High', label: 'High' },
+          ]} />
+          <Select label="Finding Type" name="finding_type" value={formData.finding_type} {...commonProps} options={[
+            { value: 'Misappropriation', label: 'Misappropriation' },
+            { value: 'Procurement', label: 'Procurement' },
+            { value: 'Compliance', label: 'Compliance' },
+            { value: 'Other', label: 'Other' },
+          ]} />
+        </>
+      )
+
+    case 'departments':
+      return (
+        <>
+          <Input label="Department" name="department" value={formData.department} {...commonProps} placeholder="e.g., Health Services" />
+          <Input label="Financial Year" name="financial_year" value={formData.financial_year} {...commonProps} placeholder="e.g., 2023/2024" />
+          <div className="grid grid-cols-2 gap-4">
+            <Input label="Approved Budget (KSh Millions)" name="approved_budget_kshm" type="number" step="0.1" value={formData.approved_budget_kshm} {...commonProps} placeholder="e.g., 250.0" />
+            <Input label="Absorption Rate (%)" name="absorption_rate" type="number" step="0.1" min="0" max="100" value={formData.absorption_rate} {...commonProps} placeholder="e.g., 85.5" />
+          </div>
+          <Select label="Status" name="status" value={formData.status} {...commonProps} options={[
+            { value: 'On Track', label: 'On Track' },
+            { value: 'Behind', label: 'Behind' },
+            { value: 'At Risk', label: 'At Risk' },
+          ]} />
+        </>
+      )
+
+    default:
+      return <p className="text-ink-muted">No form available for this entity type.</p>
+  }
+}
+
+function renderViewDetails(entity, record) {
+  const fields = { ...record }
+  delete fields._key
+
+  return (
+    <dl className="grid grid-cols-2 gap-4 text-sm">
+      {Object.entries(fields).map(([key, value]) => (
+        <div key={key} className="col-span-1">
+          <dt className="text-ink-muted">{key.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())}</dt>
+          <dd className="font-medium text-ink">{value == null || value === '' ? '—' : String(value)}</dd>
+        </div>
+      ))}
+    </dl>
   )
 }
